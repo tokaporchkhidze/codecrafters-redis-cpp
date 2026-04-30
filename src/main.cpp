@@ -64,17 +64,22 @@ int main(int argc, char **argv)
   }
   std::println("Client connected");
   std::vector<uint8_t> receiveBuffer(1024);
-  auto const bytesRead{
-          recv(client_fd, receiveBuffer.data(), receiveBuffer.size(), 0)};
-  if (bytesRead > 0) {
-    std::println("Received data: {}",
-                 std::string_view(
-                         reinterpret_cast<char const *>(receiveBuffer.data()),
-                         bytesRead));
-    std::println("Sending data back to client");
-    char constexpr reply[] = "+PONG\r\n";
-    auto const sentBytes{send(client_fd, reply, sizeof(reply) - 1, 0)};
-    std::println("Sent {} bytes", sentBytes);
+  while (true) {
+    auto const bytesRead{
+            recv(client_fd, receiveBuffer.data(), receiveBuffer.size(), 0)};
+    if (bytesRead > 0) {
+      std::println("Received data: {}",
+                   std::string_view(
+                           reinterpret_cast<char const *>(receiveBuffer.data()),
+                           bytesRead));
+      std::println("Sending data back to client");
+      char constexpr reply[] = "+PONG\r\n";
+      auto const sentBytes{send(client_fd, reply, sizeof(reply) - 1, 0)};
+      std::println("Sent {} bytes", sentBytes);
+    } else {
+      std::println("Client disconnected");
+      break;
+    }
   }
 
   close(server_fd);
