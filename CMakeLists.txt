@@ -1,10 +1,11 @@
 cmake_minimum_required(VERSION 3.13)
 
-project(redis-starter-cpp)
+project(redis-starter-cpp LANGUAGES CXX)
 
 file(GLOB_RECURSE SOURCE_FILES src/*.cpp)
 
 set(CMAKE_CXX_STANDARD 23) # Enable the C++23 standard
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 
 find_package(Threads REQUIRED)
