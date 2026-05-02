@@ -1,56 +1,94 @@
-#include "tcp-connection.h"
-
 #include <array>
 #include <cerrno>
 #include <print>
-#include <system_error>
+#include <string_view>
 #include <sys/epoll.h>
 #include <sys/socket.h>
+#include <system_error>
 #include <unistd.h>
 #include <utility>
+#include <vector>
+
+#include "redis_core/resp-decoder.h"
+#include "tcp-connection.h"
+
+#include "redis_core/resp-encoder.h"
 
 using namespace redis_net;
 
 TcpConnection::TcpConnection(EventLoop &event_loop,
                              int const fd,
-                             CloseCallback on_close)
-    : event_loop_{event_loop}, fd_{fd}, on_close_{std::move(on_close)}
+                             CloseCallback on_close) :
+    event_loop_{event_loop}, fd_{fd}, on_close_{std::move(on_close)}
 {
 }
 
-TcpConnection::~TcpConnection() noexcept
-{
-  close_connection();
-}
+TcpConnection::~TcpConnection() noexcept { close_connection(); }
 
-int TcpConnection::fd() const
-{
-  return fd_;
-}
+int TcpConnection::fd() const { return fd_; }
 
 void TcpConnection::start()
 {
   auto self{shared_from_this()};
-  event_loop_.add(
-          fd_,
-          EPOLLIN | EPOLLRDHUP,
-          EventLoop::Handler{
-                  .on_read = [self] { self->handle_read(); },
-                  .on_write = [self] { self->handle_write(); },
-                  .on_close = [self] { self->handle_close(); },
-                  .on_error = [self](std::error_code const error) {
-                    self->handle_error(error);
-                  },
-          });
+  event_loop_.add(fd_,
+                  EPOLLIN | EPOLLRDHUP,
+                  EventLoop::Handler{
+                          .on_read = [self] { self->handle_read(); },
+                          .on_write = [self] { self->handle_write(); },
+                          .on_close = [self] { self->handle_close(); },
+                          .on_error = [self](std::error_code const error)
+                          { self->handle_error(error); },
+                  });
 }
 
 void TcpConnection::handle_read()
 {
-  std::array<char, 4096> buffer{};
+  std::array<uint8_t, 4096> buffer{};
   while (true) {
     auto const bytes_read{recv(fd_, buffer.data(), buffer.size(), 0)};
     if (bytes_read > 0) {
-      queue_response("+PONG\r\n");
+      input_buffer_.insert(
+              input_buffer_.end(), buffer.begin(), buffer.begin() + bytes_read);
+
+      while (!input_buffer_.empty()) {
+        std::string_view const request{
+                reinterpret_cast<char const *>(input_buffer_.data()),
+                input_buffer_.size()};
+        const auto [status, bytes_consumed, args, error_message]{
+                parser_.try_parse(request)};
+
+        if (bytes_consumed > 0) {
+          std::println("Bytes consumed: {}", bytes_consumed);
+          input_buffer_.erase(input_buffer_.begin(),
+                              input_buffer_.begin() + bytes_consumed);
+        }
+
+        if (status == redis_core::RespDecoder::Status::Incomplete) {
+          std::println("Incomplete");
+          break;
+        }
+        if (status == redis_core::RespDecoder::Status::Error) {
+          parser_.reset();
+          queue_response("-ERR " + error_message + "\r\n");
+          input_buffer_.clear();
+          break;
+        }
+        if (status == redis_core::RespDecoder::Status::Complete) {
+          parser_.reset();
+          std::println("Complete");
+          for (auto const &arg: args) {
+            std::println("Received: {}", arg);
+          }
+          // TODO: Temporary, most likely I need to create separate
+          //  class for handling commands.
+          if (args.size() == 1 && args[0] == "PING") {
+            queue_response(redis_core::RespEncoder::encode_simple_string("PONG"));
+          }
+          if (args.size() == 2 && args[0] == "ECHO") {
+            queue_response(redis_core::RespEncoder::encode_bulk_string(args[1]));
+          }
+        }
+      }
       continue;
     }
     if (bytes_read == 0) {
@@ -99,7 +137,7 @@ void TcpConnection::handle_error(std::error_code const error)
   handle_close();
 }
 
-void TcpConnection::queue_response(std::string const& response)
+void TcpConnection::queue_response(std::string const &response)
 {
   output_buffer_ += response;
   event_loop_.modify(fd_, EPOLLIN | EPOLLOUT | EPOLLRDHUP);

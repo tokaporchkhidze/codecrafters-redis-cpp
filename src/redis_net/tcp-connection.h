@@ -1,10 +1,12 @@
-#ifndef REDIS_STARTER_CPP_TCP_CONNECTION_H
-#define REDIS_STARTER_CPP_TCP_CONNECTION_H
+#ifndef REDIS_CPP_TCP_CONNECTION_H
+#define REDIS_CPP_TCP_CONNECTION_H
 
 #include <functional>
 #include <memory>
 #include <string>
+#include <vector>
 
+#include "redis_core/resp-decoder.h"
 #include "event-loop.h"
 
 namespace redis_net
@@ -27,6 +29,9 @@ public:
 private:
   EventLoop &event_loop_;
   int fd_{-1};
+  std::vector<uint8_t> input_buffer_{};
+  redis_core::RespDecoder parser_{};
+  
   std::string output_buffer_{};
   CloseCallback on_close_;
 
@@ -40,4 +45,4 @@ private:
 
 } // namespace redis_net
 
-#endif // REDIS_STARTER_CPP_TCP_CONNECTION_H
+#endif // REDIS_CPP_TCP_CONNECTION_H

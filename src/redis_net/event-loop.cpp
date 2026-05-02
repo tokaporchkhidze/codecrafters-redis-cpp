@@ -26,7 +26,7 @@ EventLoop::~EventLoop() noexcept
   }
 }
 
-void EventLoop::add(int const fd, std::uint32_t const events, Handler handler)
+void EventLoop::add(int const fd, uint32_t const events, Handler handler)
 {
   epoll_event new_event{};
   new_event.events = events;
@@ -38,7 +38,7 @@ void EventLoop::add(int const fd, std::uint32_t const events, Handler handler)
   handlers_.insert_or_assign(fd, std::move(handler));
 }
 
-void EventLoop::modify(int const fd, std::uint32_t const events) const
+void EventLoop::modify(int const fd, uint32_t const events) const
 {
   if (!handlers_.contains(fd)) {
     return;

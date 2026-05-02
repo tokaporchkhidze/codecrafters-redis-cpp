@@ -1,5 +1,5 @@
-#ifndef REDIS_STARTER_CPP_ERRNO_ERROR_H
-#define REDIS_STARTER_CPP_ERRNO_ERROR_H
+#ifndef REDIS_CPP_ERRNO_ERROR_H
+#define REDIS_CPP_ERRNO_ERROR_H
 #include <expected>
 #include <string>
 #include <system_error>
@@ -22,4 +22,4 @@ inline void print_errno()
 
 }
 
-#endif // REDIS_STARTER_CPP_ERRNO_ERROR_H
+#endif // REDIS_CPP_ERRNO_ERROR_H

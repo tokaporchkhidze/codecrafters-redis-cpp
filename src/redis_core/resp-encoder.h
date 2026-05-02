@@ -1,0 +1,25 @@
+#ifndef REDIS_CPP_RESP_ENCODER_H
+#define REDIS_CPP_RESP_ENCODER_H
+
+#include <string>
+#include <string_view>
+
+namespace redis_core
+{
+
+class RespEncoder
+{
+public:
+  static std::string encode_bulk_string(std::string_view message);
+  static std::string encode_simple_string(std::string_view message);
+
+private:
+  static std::string constexpr s_terminator{"\r\n"};
+  static char constexpr s_bulk_string_prefix{'$'};
+  static char constexpr s_simple_string_prefix{'+'};
+
+};
+
+}
+
+#endif // REDIS_CPP_RESP_ENCODER_H

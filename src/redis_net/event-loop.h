@@ -1,6 +1,6 @@
 
-#ifndef REDIS_STARTER_CPP_EVENT_LOOP_H
-#define REDIS_STARTER_CPP_EVENT_LOOP_H
+#ifndef REDIS_CPP_EVENT_LOOP_H
+#define REDIS_CPP_EVENT_LOOP_H
 #include <cstdint>
 #include <functional>
 #include <system_error>
@@ -26,8 +26,8 @@ public:
   EventLoop(EventLoop const &) = delete;
   EventLoop &operator=(EventLoop const &) = delete;
 
-  void add(int fd, std::uint32_t events, Handler handler);
-  void modify(int fd, std::uint32_t events) const;
+  void add(int fd, uint32_t events, Handler handler);
+  void modify(int fd, uint32_t events) const;
   void remove(int fd);
   void run();
   void stop();
@@ -39,4 +39,4 @@ private:
 
 } // namespace redis_net
 
-#endif // REDIS_STARTER_CPP_EVENT_LOOP_H
+#endif // REDIS_CPP_EVENT_LOOP_H

@@ -15,7 +15,6 @@ int main()
       return 1;
     }
 
-    std::println("Logs from your program will appear here!");
     std::println("Waiting for clients to connect...");
     event_loop.run();
   } catch (std::exception const &error) {

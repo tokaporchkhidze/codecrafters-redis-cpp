@@ -1,5 +1,5 @@
-#ifndef REDIS_STARTER_CPP_TCP_SERVER_H
-#define REDIS_STARTER_CPP_TCP_SERVER_H
+#ifndef REDIS_CPP_TCP_SERVER_H
+#define REDIS_CPP_TCP_SERVER_H
 #include <expected>
 #include <memory>
 #include <string>
@@ -36,4 +36,4 @@ private:
 } // namespace redis_net
 
 
-#endif // REDIS_STARTER_CPP_TCP_SERVER_H
+#endif // REDIS_CPP_TCP_SERVER_H
