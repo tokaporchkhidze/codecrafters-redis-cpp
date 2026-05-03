@@ -12,11 +12,14 @@ class RespEncoder
 public:
   static std::string encode_bulk_string(std::string_view message);
   static std::string encode_simple_string(std::string_view message);
+  static std::string encode_null_string();
+  static std::string encode_simple_error(std::string_view message);
 
 private:
   static std::string constexpr s_terminator{"\r\n"};
   static char constexpr s_bulk_string_prefix{'$'};
   static char constexpr s_simple_string_prefix{'+'};
+  static char constexpr s_simple_error_prefix{'-'};
 
 };
 

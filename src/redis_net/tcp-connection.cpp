@@ -18,8 +18,12 @@ using namespace redis_net;
 
 TcpConnection::TcpConnection(EventLoop &event_loop,
                              int const fd,
-                             CloseCallback on_close) :
-    event_loop_{event_loop}, fd_{fd}, on_close_{std::move(on_close)}
+                             CloseCallback on_close,
+                             RedisExecutorPtr p_redis_executor) :
+    event_loop_{event_loop},
+    fd_{fd},
+    p_redis_executor_(std::move(p_redis_executor)),
+    on_close_{std::move(on_close)}
 {
 }
 
@@ -47,6 +51,7 @@ void TcpConnection::handle_read()
   while (true) {
     auto const bytes_read{recv(fd_, buffer.data(), buffer.size(), 0)};
     if (bytes_read > 0) {
+      // TODO: Need to implement better buffer handling.
       input_buffer_.insert(
               input_buffer_.end(), buffer.begin(), buffer.begin() + bytes_read);
 
@@ -63,30 +68,25 @@ void TcpConnection::handle_read()
                               input_buffer_.begin() + bytes_consumed);
         }
 
-        if (status == redis_core::RespDecoder::Status::Incomplete) {
+        if (status == RespDecoder::Status::Incomplete) {
           std::println("Incomplete");
           break;
         }
-        if (status == redis_core::RespDecoder::Status::Error) {
+        if (status == RespDecoder::Status::Error) {
           parser_.reset();
-          queue_response("-ERR " + error_message + "\r\n");
+          queue_response(
+                  RespEncoder::encode_simple_error("ERR " + error_message));
           input_buffer_.clear();
           break;
         }
-        if (status == redis_core::RespDecoder::Status::Complete) {
+        if (status == RespDecoder::Status::Complete) {
           parser_.reset();
           std::println("Complete");
           for (auto const &arg: args) {
             std::println("Received: {}", arg);
           }
-          // TODO: Temporary, most likely I need to create separate
-          //  class for handling commands.
-          if (args.size() == 1 && args[0] == "PING") {
-            queue_response(redis_core::RespEncoder::encode_simple_string("PONG"));
-          }
-          if (args.size() == 2 && args[0] == "ECHO") {
-            queue_response(redis_core::RespEncoder::encode_bulk_string(args[1]));
-          }
+          RedisCommand cmd(args);
+          queue_response(p_redis_executor_->execute(cmd));
         }
       }
       continue;

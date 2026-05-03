@@ -1,14 +1,18 @@
 #include <exception>
 #include <print>
 
+#include "redis_core/redis-executor.h"
 #include "redis_net/event-loop.h"
 #include "redis_net/tcp-server.h"
+#include "redis_storage/redis-store.h"
 
 int main()
 {
   try {
     redis_net::EventLoop event_loop;
-    redis_net::TcpServer server{event_loop};
+    auto p_redis_store = std::make_shared<RedisStore>();
+    auto p_redis_executor = std::make_shared<RedisExecutor>(p_redis_store);
+    redis_net::TcpServer server{event_loop, p_redis_executor};
 
     if (auto started{server.start(6379, 5)}; !started) {
       std::println(stderr, "failed to start server: {}", started.error());

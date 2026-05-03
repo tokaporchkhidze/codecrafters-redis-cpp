@@ -29,7 +29,8 @@ void set_nonblocking(int const fd)
 
 } // namespace
 
-TcpServer::TcpServer(EventLoop &event_loop) : event_loop_{event_loop}
+TcpServer::TcpServer(EventLoop &event_loop, RedisExecutorPtr p_redis_executor) :
+    event_loop_(event_loop), p_redis_executor_(std::move(p_redis_executor))
 {
   server_fd_ = socket(AF_INET, SOCK_STREAM, 0);
   if (server_fd_ == -1) {
@@ -60,16 +61,18 @@ std::expected<void, std::string> TcpServer::start(int const port,
   if (listen(server_fd_, conn_backlog) == -1) {
     return unexpected_errno();
   }
-  event_loop_.add(
-          server_fd_,
-          EPOLLIN,
-          EventLoop::Handler{
-                  .on_read = [this] { handle_accept(); },
-                  .on_error = [](std::error_code const error) {
-                    std::println(stderr, "server socket error: {}",
-                                 error.message());
-                  },
-          });
+  event_loop_.add(server_fd_,
+                  EPOLLIN,
+                  EventLoop::Handler{
+                          .on_read = [this] { handle_accept(); },
+                          .on_error =
+                                  [](std::error_code const error)
+                          {
+                            std::println(stderr,
+                                         "server socket error: {}",
+                                         error.message());
+                          },
+                  });
   return {};
 }
 
@@ -88,30 +91,27 @@ void TcpServer::handle_accept()
     try {
       set_nonblocking(client_fd);
     } catch (std::system_error const &error) {
-      std::println(stderr, "failed to configure client socket: {}",
-                   error.what());
+      std::println(
+              stderr, "failed to configure client socket: {}", error.what());
       close(client_fd);
       continue;
     }
 
-    auto connection{std::make_shared<TcpConnection>(
-            event_loop_,
-            client_fd,
-            [this](int const fd) { remove_connection(fd); })};
+    auto connection{
+            std::make_shared<TcpConnection>(
+                    event_loop_,
+                    client_fd,
+                    [this](int const fd) { remove_connection(fd); },
+                    p_redis_executor_),
+    };
     connections_.emplace(client_fd, connection);
     connection->start();
   }
 }
 
-TcpServer::~TcpServer() noexcept
-{
-  close_server();
-}
+TcpServer::~TcpServer() noexcept { close_server(); }
 
-void TcpServer::remove_connection(int const fd)
-{
-  connections_.erase(fd);
-}
+void TcpServer::remove_connection(int const fd) { connections_.erase(fd); }
 
 void TcpServer::close_server() noexcept
 {

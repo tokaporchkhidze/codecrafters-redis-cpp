@@ -25,3 +25,18 @@ std::string RespEncoder::encode_simple_string(std::string_view const message)
                      message,
                      s_terminator);
 }
+
+std::string RespEncoder::encode_null_string()
+{
+  return "$-1\r\n";
+}
+
+std::string RespEncoder::encode_simple_error(std::string_view const message)
+{
+  return std::format("{}{}{}",
+                     s_simple_error_prefix,
+                     message,
+                     s_terminator);
+}
+
+

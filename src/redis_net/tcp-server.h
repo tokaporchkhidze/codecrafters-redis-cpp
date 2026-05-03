@@ -6,7 +6,10 @@
 #include <unordered_map>
 
 #include "event-loop.h"
+#include "redis_core/redis-executor.h"
 #include "tcp-connection.h"
+
+using namespace redis_core;
 
 namespace redis_net
 {
@@ -14,7 +17,7 @@ namespace redis_net
 class TcpServer
 {
 public:
-  explicit TcpServer(EventLoop &event_loop);
+  explicit TcpServer(EventLoop &event_loop, RedisExecutorPtr p_redis_executor);
   ~TcpServer() noexcept;
 
   TcpServer(TcpServer const &) = delete;
@@ -27,6 +30,7 @@ private:
   EventLoop &event_loop_;
   int server_fd_{-1};
   std::unordered_map<int, std::shared_ptr<TcpConnection>> connections_{};
+  RedisExecutorPtr p_redis_executor_;
 
   void handle_accept();
   void remove_connection(int fd);
