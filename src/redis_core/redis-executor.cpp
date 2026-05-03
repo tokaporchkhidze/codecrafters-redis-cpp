@@ -15,10 +15,14 @@ std::string RedisExecutor::execute(RedisCommand const &cmd)
   // TODO: Just simple implementation of execute
   auto const &args{cmd.args()};
   if (auto const name{cmd.name()}; name == "SET") {
-    if (args.size() != 2) {
+    if (args.size() < 2) {
       return RespEncoder::encode_simple_error("ERR wrong number of arguments");
     }
-    p_redis_store_->set(args[0], args[1]);
+    RedisStore::SetOptions options;
+    if (args.size() == 4 && args[2] == "PX") {
+      options.ttl_ms = std::chrono::milliseconds{std::stoi(args[3])};
+    }
+    p_redis_store_->set(args[0], args[1], options);
     return RespEncoder::encode_simple_string("OK");
   } else if (name == "GET") {
     if (args.size() != 1) {
