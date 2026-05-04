@@ -30,6 +30,7 @@ RedisExecutor::RedisExecutor(RedisStorePtr p_redis_store) :
           "RPUSH", 2, std::nullopt, &RedisExecutor::execute_rpush);
   handlers_.try_emplace(
           "LPUSH", 2, std::nullopt, &RedisExecutor::execute_lpush);
+  handlers_.try_emplace("LLEN", 1, 1, &RedisExecutor::execute_llen);
   handlers_.try_emplace("LRANGE", 3, 3, &RedisExecutor::execute_lrange);
 }
 
@@ -107,6 +108,17 @@ RedisExecutor::execute_lpush(std::span<std::string const> const args)
     return Integer{new_size.value()};
       }
   return SimpleError("Failed to push to the list");
+}
+
+RedisExecutor::RedisReply
+RedisExecutor::execute_llen(std::span<std::string const> const args)
+{
+  // TODO: I need to implement some proper error handling,
+  // not only here but throughout the project.
+  if (auto const size{p_store_->llen(args[0])}; size.has_value()) {
+    return Integer{size.value()};
+  }
+  return SimpleError("Failed to get the list length");
 }
 
 RedisExecutor::RedisReply

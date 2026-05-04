@@ -48,6 +48,19 @@ RedisStore::lpush(std::string const &key, std::span<std::string const> values)
   return push_to_list<PushSide::LEFT>(key, values);
 }
 
+std::expected<int64_t, RedisStore::StoreError>
+RedisStore::llen(std::string const &key)
+{
+  if (auto const it{map_.find(key)}; it != map_.cend()) {
+    if (!std::holds_alternative<List>(it->second.value)) {
+      return std::unexpected(StoreError::WRONG_TYPE);
+    }
+    auto const &list = std::get<List>(it->second.value);
+    return list.size();
+  }
+  return 0;
+}
+
 std::vector<std::string>
 RedisStore::lrange(std::string const &key, int64_t start, int64_t stop)
 {
