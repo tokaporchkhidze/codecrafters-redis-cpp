@@ -85,6 +85,7 @@ private:
   RedisReply execute_set(std::span<std::string const> args);
   RedisReply execute_get(std::span<std::string const> args);
   RedisReply execute_echo(std::span<std::string const> args);
+  RedisReply execute_rpush(std::span<std::string const> args);
 
   std::string encode_reply(RedisReply const &reply);
 

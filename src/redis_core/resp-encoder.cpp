@@ -20,28 +20,17 @@ std::string RespEncoder::encode_bulk_string(std::string_view const message)
 
 std::string RespEncoder::encode_simple_string(std::string_view const message)
 {
-  return std::format("{}{}{}",
-                     s_simple_string_prefix,
-                     message,
-                     s_terminator);
+  return std::format("{}{}{}", s_simple_string_prefix, message, s_terminator);
 }
 
-std::string RespEncoder::encode_null_string()
-{
-  return "$-1\r\n";
-}
+std::string RespEncoder::encode_null_string() { return "$-1\r\n"; }
 
 std::string RespEncoder::encode_simple_error(std::string_view const message)
 {
-  return std::format("{}{}{}",
-                     s_simple_error_prefix,
-                     message,
-                     s_terminator);
+  return std::format("{}{}{}", s_simple_error_prefix, message, s_terminator);
 }
 
 std::string RespEncoder::encode_integer(std::int64_t value)
 {
-  return std::format(":{}", value);
+  return std::format(":{}{}", value, s_terminator);
 }
-
-

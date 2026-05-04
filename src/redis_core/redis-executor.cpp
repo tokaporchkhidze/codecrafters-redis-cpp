@@ -26,6 +26,8 @@ RedisExecutor::RedisExecutor(RedisStorePtr p_redis_store) :
   handlers_.try_emplace("ECHO", 0, 1, &RedisExecutor::execute_echo);
   handlers_.try_emplace("SET", 2, 4, &RedisExecutor::execute_set);
   handlers_.try_emplace("GET", 1, 1, &RedisExecutor::execute_get);
+  handlers_.try_emplace(
+          "RPUSH", 2, std::nullopt, &RedisExecutor::execute_rpush);
 }
 
 std::string RedisExecutor::execute(RedisCommand const &cmd)
@@ -34,7 +36,8 @@ std::string RedisExecutor::execute(RedisCommand const &cmd)
   if (auto const it{handlers_.find(cmd.name())}; it != handlers_.cend()) {
     auto &[min_argc, max_argc_op, handler] = it->second;
     if (args.size() < min_argc || args.size() > max_argc_op.value_or(INT_MAX)) {
-      return encode_reply(SimpleError("Invliad number of arguments"));
+      return encode_reply(SimpleError(
+              std::format("Invalid number of arguments - {}", args.size())));
     }
     return encode_reply(std::invoke(handler, this, args));
   }
@@ -42,7 +45,7 @@ std::string RedisExecutor::execute(RedisCommand const &cmd)
 }
 
 RedisExecutor::RedisReply
-RedisExecutor::execute_ping(std::span<std::string const> const args)
+RedisExecutor::execute_ping(std::span<std::string const> const)
 {
   return SimpleString("PONG");
 }
@@ -75,6 +78,18 @@ RedisExecutor::execute_echo(std::span<std::string const> const args)
     return BulkString("");
   }
   return BulkString(args[0]);
+}
+
+RedisExecutor::RedisReply
+RedisExecutor::execute_rpush(std::span<std::string const> args)
+{
+  // TODO: I need to implement some proper error handling,
+  // not only here but throughout the project.
+  if (auto const new_size{p_store_->rpush(args[0], args.subspan(1))};
+      new_size.has_value()) {
+    return Integer{new_size.value()};
+  }
+  return SimpleError("Failed to push to the list");
 }
 
 std::string RedisExecutor::encode_reply(RedisReply const &reply)
