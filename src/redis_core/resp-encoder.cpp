@@ -39,4 +39,9 @@ std::string RespEncoder::encode_simple_error(std::string_view const message)
                      s_terminator);
 }
 
+std::string RespEncoder::encode_integer(std::int64_t value)
+{
+  return std::format(":{}", value);
+}
+
 

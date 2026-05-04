@@ -1,46 +1,96 @@
 #include "redis-executor.h"
 
 #include <format>
+#include <functional>
+
 #include "resp-encoder.h"
 
 using namespace redis_core;
+using namespace redis_storage;
+
+namespace
+{
+
+template<class... Ts>
+struct Overloaded : Ts...
+{
+  using Ts::operator()...;
+};
+
+} // namespace
 
 RedisExecutor::RedisExecutor(RedisStorePtr p_redis_store) :
-    p_redis_store_(std::move(p_redis_store))
+    p_store_(std::move(p_redis_store))
 {
+  handlers_.try_emplace("PING", 0, 0, &RedisExecutor::execute_ping);
+  handlers_.try_emplace("ECHO", 0, 1, &RedisExecutor::execute_echo);
+  handlers_.try_emplace("SET", 2, 4, &RedisExecutor::execute_set);
+  handlers_.try_emplace("GET", 1, 1, &RedisExecutor::execute_get);
 }
 
 std::string RedisExecutor::execute(RedisCommand const &cmd)
 {
-  // TODO: Just simple implementation of execute
   auto const &args{cmd.args()};
-  if (auto const name{cmd.name()}; name == "SET") {
-    if (args.size() < 2) {
-      return RespEncoder::encode_simple_error("ERR wrong number of arguments");
+  if (auto const it{handlers_.find(cmd.name())}; it != handlers_.cend()) {
+    auto &[min_argc, max_argc_op, handler] = it->second;
+    if (args.size() < min_argc || args.size() > max_argc_op.value_or(INT_MAX)) {
+      return encode_reply(SimpleError("Invliad number of arguments"));
     }
-    RedisStore::SetOptions options;
-    if (args.size() == 4 && args[2] == "PX") {
-      options.ttl_ms = std::chrono::milliseconds{std::stoi(args[3])};
-    }
-    p_redis_store_->set(args[0], args[1], options);
-    return RespEncoder::encode_simple_string("OK");
-  } else if (name == "GET") {
-    if (args.size() != 1) {
-      return RespEncoder::encode_simple_error("ERR wrong number of arguments");
-    }
-    if (auto const value{p_redis_store_->get(args[0])}; value.has_value()) {
-      return RespEncoder::encode_bulk_string(value.value());
-    }
-    return RespEncoder::encode_null_string();
-  } else if (name == "PING") {
-    return RespEncoder::encode_simple_string("PONG");
-  } else if (name == "ECHO") {
-    if (args.empty()) {
-      return RespEncoder::encode_simple_string("");
-    }
-    return RespEncoder::encode_bulk_string(args[0]);
-  } else {
-    return RespEncoder::encode_simple_error(
-            std::format("ERR unknown command {}", name));
+    return encode_reply(std::invoke(handler, this, args));
   }
+  return encode_reply(SimpleError("Unknown command"));
+}
+
+RedisExecutor::RedisReply
+RedisExecutor::execute_ping(std::span<std::string const> const args)
+{
+  return SimpleString("PONG");
+}
+
+RedisExecutor::RedisReply
+RedisExecutor::execute_set(std::span<std::string const> const args)
+{
+  std::string_view constexpr px_arg{"PX"};
+  RedisStore::SetOptions options;
+  if (args.size() == 4 && args[2] == px_arg) {
+    options.ttl_ms = std::chrono::milliseconds{std::stoi(args[3])};
+  }
+  p_store_->set(args[0], args[1], options);
+  return SimpleString("OK");
+}
+
+RedisExecutor::RedisReply
+RedisExecutor::execute_get(std::span<std::string const> const args)
+{
+  if (auto const value{p_store_->get(args[0])}; value.has_value()) {
+    return BulkString(value.value());
+  }
+  return NullBulkString{};
+}
+
+RedisExecutor::RedisReply
+RedisExecutor::execute_echo(std::span<std::string const> const args)
+{
+  if (args.empty()) {
+    return BulkString("");
+  }
+  return BulkString(args[0]);
+}
+
+std::string RedisExecutor::encode_reply(RedisReply const &reply)
+{
+  return std::visit(
+          Overloaded{
+                  [](SimpleString const &val)
+                  { return RespEncoder::encode_simple_string(val.value); },
+                  [](BulkString const &val)
+                  { return RespEncoder::encode_bulk_string(val.value); },
+                  [](NullBulkString const &)
+                  { return RespEncoder::encode_null_string(); },
+                  [](SimpleError const &val)
+                  { return RespEncoder::encode_simple_error(val.value); },
+                  [](Integer const &val)
+                  { return RespEncoder::encode_integer(val.value); },
+          },
+          reply);
 }

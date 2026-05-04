@@ -1,6 +1,7 @@
 #ifndef REDIS_CPP_RESP_ENCODER_H
 #define REDIS_CPP_RESP_ENCODER_H
 
+#include <cstdint>
 #include <string>
 #include <string_view>
 
@@ -14,6 +15,7 @@ public:
   static std::string encode_simple_string(std::string_view message);
   static std::string encode_null_string();
   static std::string encode_simple_error(std::string_view message);
+  static std::string encode_integer(std::int64_t value);
 
 private:
   static std::string constexpr s_terminator{"\r\n"};

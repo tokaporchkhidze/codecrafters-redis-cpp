@@ -3,10 +3,9 @@
 
 #include <string>
 
+#include <variant>
 #include "redis-command.h"
 #include "redis_storage/redis-store.h"
-
-using namespace redis_storage;
 
 namespace redis_core
 {
@@ -14,12 +13,84 @@ namespace redis_core
 class RedisExecutor
 {
 public:
-  explicit RedisExecutor(RedisStorePtr p_redis_store);
+  explicit RedisExecutor(redis_storage::RedisStorePtr p_redis_store);
 
-  std::string execute(RedisCommand const& cmd);
+  std::string execute(RedisCommand const &cmd);
 
 private:
-  RedisStorePtr p_redis_store_;
+  struct SimpleString
+  {
+    std::string value;
+  };
+
+  struct BulkString
+  {
+    std::string value;
+  };
+
+  struct SimpleError
+  {
+    std::string value;
+  };
+
+  struct NullBulkString
+  {
+  };
+
+  struct Integer
+  {
+    int64_t value;
+  };
+
+  using RedisReply = std::variant<SimpleString,
+                                  BulkString,
+                                  SimpleError,
+                                  Integer,
+                                  NullBulkString>;
+  using Handler =
+          RedisReply (RedisExecutor::*)(std::span<std::string const> args);
+
+  struct CommandSpec
+  {
+    // Defined explicitly, so we can in-place construct
+    // this struct in the handlers_
+    CommandSpec(int const min_argc,
+                std::optional<int> const max_argc,
+                Handler const handler) :
+        min_argc{min_argc}, max_argc{max_argc}, handler{handler}
+    {
+    }
+
+    int min_argc{};
+    std::optional<int> max_argc{};
+    Handler handler{};
+  };
+
+  // For enabling, looking up commands with string_view_s.
+  struct StringHash
+  {
+    using is_transparent = void;
+
+    std::size_t operator()(std::string_view const value) const
+    {
+      return std::hash<std::string_view>{}(value);
+    }
+  };
+
+  using CommandHandlers = std::
+          unordered_map<std::string, CommandSpec, StringHash, std::equal_to<>>;
+
+
+  RedisReply execute_ping(std::span<std::string const> args);
+  RedisReply execute_set(std::span<std::string const> args);
+  RedisReply execute_get(std::span<std::string const> args);
+  RedisReply execute_echo(std::span<std::string const> args);
+
+  std::string encode_reply(RedisReply const &reply);
+
+
+  redis_storage::RedisStorePtr p_store_;
+  CommandHandlers handlers_;
 };
 
 using RedisExecutorPtr = std::shared_ptr<RedisExecutor>;

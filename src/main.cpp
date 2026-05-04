@@ -6,6 +6,8 @@
 #include "redis_net/tcp-server.h"
 #include "redis_storage/redis-store.h"
 
+using namespace redis_storage;
+
 int main()
 {
   try {
