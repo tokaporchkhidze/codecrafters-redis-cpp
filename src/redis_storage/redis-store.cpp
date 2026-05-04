@@ -1,5 +1,7 @@
 #include "redis-store.h"
 
+#include <ranges>
+
 using namespace redis_storage;
 
 void RedisStore::set(std::string const &key,
@@ -37,33 +39,13 @@ std::expected<int64_t, RedisStore::StoreError>
 RedisStore::rpush(std::string const &key,
                   std::span<std::string const> const values)
 {
-  auto [it, inserted] = map_.try_emplace(key,
-                                         RedisValue{
-                                                 List{},
-                                                 std::nullopt,
-                                         });
+  return push_to_list<PushSide::RIGHT>(key, values);
+}
 
-  if (!std::holds_alternative<List>(it->second.value)) {
-    if (it->second.expires_at.has_value() &&
-        it->second.expires_at.value() < std::chrono::steady_clock::now()) {
-      map_.erase(it);
-      it = map_.try_emplace(key,
-                            RedisValue{
-                                    List{},
-                                    std::nullopt,
-                            })
-                   .first;
-    } else {
-      return std::unexpected(StoreError::WRONG_TYPE);
-    }
-  }
-
-  auto &list = std::get<List>(it->second.value);
-  for (auto const &new_value: values) {
-    list.push_back(new_value);
-  }
-
-  return list.size();
+std::expected<int64_t, RedisStore::StoreError>
+RedisStore::lpush(std::string const &key, std::span<std::string const> values)
+{
+  return push_to_list<PushSide::LEFT>(key, values);
 }
 
 std::vector<std::string>
@@ -96,4 +78,32 @@ RedisStore::lrange(std::string const &key, int64_t start, int64_t stop)
   result.reserve(last - first);
   std::ranges::copy(first, last, std::back_inserter(result));
   return result;
+}
+
+
+std::expected<std::reference_wrapper<RedisStore::List>, RedisStore::StoreError>
+RedisStore::get_or_create_list(std::string const &key)
+{
+  auto [it, inserted] = map_.try_emplace(key,
+                                         RedisValue{
+                                                 List{},
+                                                 std::nullopt,
+                                         });
+
+  if (it->second.expires_at.has_value() &&
+      it->second.expires_at.value() < std::chrono::steady_clock::now()) {
+    map_.erase(it);
+    it = map_.try_emplace(key,
+                          RedisValue{
+                                  List{},
+                                  std::nullopt,
+                          })
+                 .first;
+  }
+
+  if (!std::holds_alternative<List>(it->second.value)) {
+    return std::unexpected(StoreError::WRONG_TYPE);
+  }
+
+  return std::ref(std::get<List>(it->second.value));
 }

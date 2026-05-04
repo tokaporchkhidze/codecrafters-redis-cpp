@@ -33,6 +33,8 @@ public:
 
   std::expected<int64_t, StoreError> rpush(std::string const &key,
                                            std::span<std::string const> values);
+  std::expected<int64_t, StoreError> lpush(std::string const &key,
+                                           std::span<std::string const> values);
   std::vector<std::string>
   lrange(std::string const &key, int64_t start, int64_t stop);
 
@@ -47,6 +49,38 @@ private:
   };
 
   std::unordered_map<std::string, RedisValue> map_{};
+
+  enum class PushSide
+  {
+    LEFT,
+    RIGHT,
+  };
+
+  std::expected<std::reference_wrapper<List>, StoreError>
+  get_or_create_list(std::string const &key);
+
+  template<PushSide side>
+  std::expected<int64_t, StoreError>
+  push_to_list(std::string const &key,
+               std::span<std::string const> const values)
+  {
+    auto list = get_or_create_list(key);
+    if (!list.has_value()) {
+      return std::unexpected(list.error());
+    }
+
+    auto &items = list->get();
+
+    for (auto const &new_value: values) {
+      if constexpr (side == PushSide::RIGHT) {
+        items.push_back(new_value);
+      } else {
+        items.push_front(new_value);
+      }
+    }
+
+    return static_cast<int64_t>(items.size());
+  }
 };
 
 using RedisStorePtr = std::shared_ptr<RedisStore>;
