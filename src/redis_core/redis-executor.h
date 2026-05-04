@@ -42,11 +42,17 @@ private:
     int64_t value;
   };
 
+  struct Array
+  {
+    std::vector<std::string> values;
+  };
+
   using RedisReply = std::variant<SimpleString,
                                   BulkString,
                                   SimpleError,
                                   Integer,
-                                  NullBulkString>;
+                                  NullBulkString,
+                                  Array>;
   using Handler =
           RedisReply (RedisExecutor::*)(std::span<std::string const> args);
 
@@ -86,6 +92,7 @@ private:
   RedisReply execute_get(std::span<std::string const> args);
   RedisReply execute_echo(std::span<std::string const> args);
   RedisReply execute_rpush(std::span<std::string const> args);
+  RedisReply execute_lrange(std::span<std::string const> args);
 
   std::string encode_reply(RedisReply const &reply);
 

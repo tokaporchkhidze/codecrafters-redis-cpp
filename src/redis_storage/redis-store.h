@@ -17,7 +17,8 @@ class RedisStore
 public:
   enum class StoreError
   {
-    WrongType = 0,
+    WRONG_TYPE = 0,
+    KEY_NOT_FOUND,
   };
 
   struct SetOptions
@@ -32,6 +33,8 @@ public:
 
   std::expected<int64_t, StoreError> rpush(std::string const &key,
                                            std::span<std::string const> values);
+  std::vector<std::string>
+  lrange(std::string const &key, int64_t start, int64_t stop);
 
 private:
   using List = std::deque<std::string>;

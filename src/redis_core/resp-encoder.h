@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace redis_core
 {
@@ -16,6 +17,7 @@ public:
   static std::string encode_null_string();
   static std::string encode_simple_error(std::string_view message);
   static std::string encode_integer(std::int64_t value);
+  static std::string encode_array(std::vector<std::string> const &values);
 
 private:
   static std::string constexpr s_terminator{"\r\n"};

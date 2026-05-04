@@ -28,6 +28,7 @@ RedisExecutor::RedisExecutor(RedisStorePtr p_redis_store) :
   handlers_.try_emplace("GET", 1, 1, &RedisExecutor::execute_get);
   handlers_.try_emplace(
           "RPUSH", 2, std::nullopt, &RedisExecutor::execute_rpush);
+  handlers_.try_emplace("LRANGE", 3, 3, &RedisExecutor::execute_lrange);
 }
 
 std::string RedisExecutor::execute(RedisCommand const &cmd)
@@ -81,7 +82,7 @@ RedisExecutor::execute_echo(std::span<std::string const> const args)
 }
 
 RedisExecutor::RedisReply
-RedisExecutor::execute_rpush(std::span<std::string const> args)
+RedisExecutor::execute_rpush(std::span<std::string const> const args)
 {
   // TODO: I need to implement some proper error handling,
   // not only here but throughout the project.
@@ -90,6 +91,13 @@ RedisExecutor::execute_rpush(std::span<std::string const> args)
     return Integer{new_size.value()};
   }
   return SimpleError("Failed to push to the list");
+}
+
+RedisExecutor::RedisReply
+RedisExecutor::execute_lrange(std::span<std::string const> const args)
+{
+  return Array(std::move(
+          p_store_->lrange(args[0], std::stoi(args[1]), std::stoi(args[2]))));
 }
 
 std::string RedisExecutor::encode_reply(RedisReply const &reply)
@@ -106,6 +114,8 @@ std::string RedisExecutor::encode_reply(RedisReply const &reply)
                   { return RespEncoder::encode_simple_error(val.value); },
                   [](Integer const &val)
                   { return RespEncoder::encode_integer(val.value); },
+                  [](Array const &val)
+                  { return RespEncoder::encode_array(val.values); },
           },
           reply);
 }

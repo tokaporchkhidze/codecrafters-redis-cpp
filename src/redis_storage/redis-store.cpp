@@ -54,7 +54,7 @@ RedisStore::rpush(std::string const &key,
                             })
                    .first;
     } else {
-      return std::unexpected(StoreError::WrongType);
+      return std::unexpected(StoreError::WRONG_TYPE);
     }
   }
 
@@ -64,4 +64,25 @@ RedisStore::rpush(std::string const &key,
   }
 
   return list.size();
+}
+
+std::vector<std::string> RedisStore::lrange(std::string const &key,
+                                            int64_t const start,
+                                            int64_t const stop)
+{
+  auto const it{map_.find(key)};
+  if (it == map_.cend() || !std::holds_alternative<List>(it->second.value)) {
+    return {};
+  }
+  auto const &list = std::get<List>(it->second.value);
+  if (start >= list.size() || start > stop) {
+    return {};
+  }
+  auto const first{list.begin() + start};
+  auto const last{list.begin() +
+                  std::min(static_cast<size_t>(stop + 1), list.size())};
+  std::vector<std::string> result;
+  result.reserve(last - first);
+  std::ranges::copy(first, last, std::back_inserter(result));
+  return result;
 }

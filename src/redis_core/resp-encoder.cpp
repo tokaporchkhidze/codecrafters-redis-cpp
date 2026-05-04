@@ -34,3 +34,14 @@ std::string RespEncoder::encode_integer(std::int64_t value)
 {
   return std::format(":{}{}", value, s_terminator);
 }
+
+std::string RespEncoder::encode_array(std::vector<std::string> const &values)
+{
+  std::string encoded = std::format("*{}{}", values.size(), s_terminator);
+
+  for (auto const &value: values) {
+    encoded += encode_bulk_string(value);
+  }
+
+  return encoded;
+}
