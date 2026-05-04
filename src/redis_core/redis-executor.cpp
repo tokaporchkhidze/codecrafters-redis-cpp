@@ -56,6 +56,8 @@ RedisExecutor::execute_set(std::span<std::string const> const args)
 {
   std::string_view constexpr px_arg{"PX"};
   RedisStore::SetOptions options;
+  // TODO: Currently only supporting passive expiration.
+  // I need to implement active one as well..................
   if (args.size() == 4 && args[2] == px_arg) {
     options.ttl_ms = std::chrono::milliseconds{std::stoi(args[3])};
   }
@@ -97,7 +99,7 @@ RedisExecutor::RedisReply
 RedisExecutor::execute_lrange(std::span<std::string const> const args)
 {
   return Array(std::move(
-          p_store_->lrange(args[0], std::stoi(args[1]), std::stoi(args[2]))));
+          p_store_->lrange(args[0], std::stoll(args[1]), std::stoll(args[2]))));
 }
 
 std::string RedisExecutor::encode_reply(RedisReply const &reply)

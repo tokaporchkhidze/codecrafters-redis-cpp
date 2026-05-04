@@ -66,21 +66,32 @@ RedisStore::rpush(std::string const &key,
   return list.size();
 }
 
-std::vector<std::string> RedisStore::lrange(std::string const &key,
-                                            int64_t const start,
-                                            int64_t const stop)
+std::vector<std::string>
+RedisStore::lrange(std::string const &key, int64_t start, int64_t stop)
 {
   auto const it{map_.find(key)};
   if (it == map_.cend() || !std::holds_alternative<List>(it->second.value)) {
     return {};
   }
   auto const &list = std::get<List>(it->second.value);
+  // normalize indexes.
+  if (start < 0) {
+    start = static_cast<int64_t>(list.size()) + start;
+  }
+  if (stop < 0) {
+    stop = static_cast<int64_t>(list.size()) + stop;
+  }
+  // if start is still negative, make it 0.
+  if (start < 0) {
+    start = 0;
+  }
   if (start >= list.size() || start > stop) {
     return {};
   }
   auto const first{list.begin() + start};
   auto const last{list.begin() +
-                  std::min(static_cast<size_t>(stop + 1), list.size())};
+                  std::min(static_cast<size_t>(stop) + 1, list.size())};
+
   std::vector<std::string> result;
   result.reserve(last - first);
   std::ranges::copy(first, last, std::back_inserter(result));
