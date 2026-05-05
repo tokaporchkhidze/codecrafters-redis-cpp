@@ -93,6 +93,28 @@ RedisStore::lrange(std::string const &key, int64_t start, int64_t stop)
   return result;
 }
 
+std::expected<std::vector<std::string>, RedisStore::StoreError>
+RedisStore::lpop(std::string const &key, int64_t const count)
+{
+  auto const it{map_.find(key)};
+  if (it == map_.cend()) {
+    return {};
+  }
+  if (!std::holds_alternative<List>(it->second.value)) {
+    return std::unexpected(StoreError::WRONG_TYPE);
+  }
+  auto &list = std::get<List>(it->second.value);
+  auto elements_to_pop = std::min(static_cast<size_t>(count), list.size());
+  std::vector<std::string> removed_elements;
+  removed_elements.reserve(elements_to_pop);
+  while (elements_to_pop > 0) {
+    removed_elements.push_back(list.front());
+    list.pop_front();
+    elements_to_pop--;
+  }
+  return removed_elements;
+}
+
 
 std::expected<std::reference_wrapper<RedisStore::List>, RedisStore::StoreError>
 RedisStore::get_or_create_list(std::string const &key)

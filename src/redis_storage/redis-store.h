@@ -38,6 +38,8 @@ public:
   std::expected<int64_t, StoreError> llen(std::string const &key);
   std::vector<std::string>
   lrange(std::string const &key, int64_t start, int64_t stop);
+  std::expected<std::vector<std::string>, StoreError>
+  lpop(std::string const &key, int64_t count);
 
 private:
   using List = std::deque<std::string>;

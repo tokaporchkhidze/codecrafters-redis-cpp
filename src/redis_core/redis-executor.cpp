@@ -32,6 +32,7 @@ RedisExecutor::RedisExecutor(RedisStorePtr p_redis_store) :
           "LPUSH", 2, std::nullopt, &RedisExecutor::execute_lpush);
   handlers_.try_emplace("LLEN", 1, 1, &RedisExecutor::execute_llen);
   handlers_.try_emplace("LRANGE", 3, 3, &RedisExecutor::execute_lrange);
+  handlers_.try_emplace("LPOP", 1, 2, &RedisExecutor::execute_lpop);
 }
 
 std::string RedisExecutor::execute(RedisCommand const &cmd)
@@ -106,7 +107,7 @@ RedisExecutor::execute_lpush(std::span<std::string const> const args)
   if (auto const new_size{p_store_->lpush(args[0], args.subspan(1))};
       new_size.has_value()) {
     return Integer{new_size.value()};
-      }
+  }
   return SimpleError("Failed to push to the list");
 }
 
@@ -126,6 +127,29 @@ RedisExecutor::execute_lrange(std::span<std::string const> const args)
 {
   return Array(std::move(
           p_store_->lrange(args[0], std::stoll(args[1]), std::stoll(args[2]))));
+}
+
+RedisExecutor::RedisReply
+RedisExecutor::execute_lpop(std::span<std::string const> const args)
+{
+  bool const has_count_arg = args.size() == 2;
+  int64_t const count = has_count_arg ? std::stoll(args[1]) : 1;
+
+  auto popped = p_store_->lpop(args[0], count);
+  if (!popped.has_value()) {
+    return SimpleError("Wrong type");
+  }
+
+  auto elements = std::move(popped.value());
+  if (elements.empty()) {
+    return NullBulkString{};
+  }
+
+  if (has_count_arg) {
+    return Array(std::move(elements));
+  }
+
+  return BulkString(std::move(elements.front()));
 }
 
 std::string RedisExecutor::encode_reply(RedisReply const &reply)
