@@ -69,8 +69,10 @@ void EventLoop::run()
   running_ = true;
   while (running_) {
     std::vector<epoll_event> events(100);
-    int const ready_fds{epoll_wait(
-            epoll_fd_, events.data(), static_cast<int>(events.size()), 1000)};
+    int const ready_fds{epoll_wait(epoll_fd_,
+                                   events.data(),
+                                   static_cast<int>(events.size()),
+                                   get_epoll_timeout_ms())};
     if (ready_fds == -1) {
       if (errno == EINTR) {
         continue;
@@ -122,7 +124,39 @@ void EventLoop::run()
         }
       }
     }
+    // after processing events, now we can call
+    // callback for timed events in the RedisExecutor.
+    timeout_callback_(EventLoopClock::now());
   }
 }
 
 void EventLoop::stop() { running_ = false; }
+
+void EventLoop::set_timer(TimeoutProvider timeout_provider,
+                          TimeoutCallback timeout_callback)
+{
+  timeout_provider_ = std::move(timeout_provider);
+  timeout_callback_ = std::move(timeout_callback);
+}
+
+int EventLoop::get_epoll_timeout_ms() const
+{
+  static int constexpr s_default_timeout_ms{1000};
+  if (!timeout_provider_) {
+    return s_default_timeout_ms;
+  }
+
+  auto const deadline = timeout_provider_();
+  if (!deadline.has_value()) {
+    return s_default_timeout_ms;
+  }
+
+  auto const now = EventLoopClock::now();
+  if (deadline.value() <= now) {
+    return 0;
+  }
+
+  auto const ms =
+          std::chrono::ceil<std::chrono::milliseconds>(deadline.value() - now);
+  return static_cast<int>(ms.count());
+}

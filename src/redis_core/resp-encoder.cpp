@@ -45,3 +45,8 @@ std::string RespEncoder::encode_array(std::vector<std::string> const &values)
 
   return encoded;
 }
+
+std::string RespEncoder::encode_null_array()
+{
+  return std::format("*-1\r\n");
+}

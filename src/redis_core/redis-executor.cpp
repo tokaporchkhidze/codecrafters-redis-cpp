@@ -19,6 +19,27 @@ struct Overloaded : Ts...
   using Ts::operator()...;
 };
 
+std::expected<double, std::string> to_double(std::string_view const buffer)
+{
+  double result{};
+  auto [ptr, ec]{std::from_chars(
+          buffer.data(), buffer.data() + buffer.size(), result)};
+  if (ec == std::errc{} && ptr == buffer.data() + buffer.size()) {
+    return result;
+  }
+  return std::unexpected("invalid double value");
+}
+
+std::chrono::steady_clock::time_point get_timeout(double const seconds)
+{
+  using clock = std::chrono::steady_clock;
+
+  auto const timeout_duration = std::chrono::ceil<clock::duration>(
+          std::chrono::duration<double>{seconds});
+
+  return clock::now() + timeout_duration;
+}
+
 } // namespace
 
 RedisExecutor::RedisExecutor(RedisStorePtr p_redis_store) :
@@ -36,7 +57,7 @@ RedisExecutor::RedisExecutor(RedisStorePtr p_redis_store) :
   handlers_.try_emplace("LRANGE", 3, 3, &RedisExecutor::execute_lrange);
   handlers_.try_emplace("LPOP", 1, 2, &RedisExecutor::execute_lpop);
   handlers_.try_emplace(
-          "BLPOP", 1, std::nullopt, &RedisExecutor::execute_blpop);
+          "BLPOP", 2, std::nullopt, &RedisExecutor::execute_blpop);
 }
 
 RedisExecutor::ExecutionResult RedisExecutor::execute(RedisCommand const &cmd,
@@ -60,10 +81,51 @@ RedisExecutor::ExecutionResult RedisExecutor::execute(RedisCommand const &cmd,
 
 void RedisExecutor::remove_blocked_client(int const fd)
 {
-  if (blocked_clients_by_fd_.contains(fd))
-  {
+  if (blocked_clients_by_fd_.contains(fd)) {
+    // Remove shared_ptr from client fd mapping
+    // which means we keep weak_ptr-s in blocked_clients_by_key_ map,
+    // those will be lazily pruned at some point during unblock_client_for_key
+    // execution, when accessed for the key.
+    // TODO: Maybe I need second thread, running periodically and doing
+    // different type of clean ups, but that's for later.
     blocked_clients_by_fd_.erase(fd);
   }
+}
+
+void RedisExecutor::expire_blocked_clients(
+        std::chrono::steady_clock::time_point now)
+{
+  std::erase_if(blocked_clients_by_fd_,
+                [this, now](auto const &entry)
+                {
+                  auto const &p_blocked_client = entry.second;
+                  auto should_be_erased =
+                          p_blocked_client->timeout_tp.has_value() &&
+                          p_blocked_client->timeout_tp.value() < now;
+                  if (should_be_erased) {
+                    p_blocked_client->callback(encode_reply(NullArray{}));
+                  }
+                  return should_be_erased;
+                });
+}
+
+std::optional<std::chrono::steady_clock::time_point>
+RedisExecutor::get_next_blocked_client_timeout()
+{
+  // TODO: Currently, I am going over every blocked client and
+  // looking for closest timeout deadline,
+  // maybe I could add min-heap to store timeouts so I can quickly
+  // retrieve min value.
+  std::optional<std::chrono::steady_clock::time_point> next_timeout;
+  for (const auto &blocked_client:
+       blocked_clients_by_fd_ | std::views::values) {
+    if (auto const timeout_tp{blocked_client->timeout_tp};
+        timeout_tp.has_value() && (!next_timeout.has_value() ||
+                                   timeout_tp.value() < next_timeout.value())) {
+      next_timeout = timeout_tp;
+    }
+  }
+  return next_timeout;
 }
 
 RedisExecutor::ExecutionOutcome
@@ -195,7 +257,20 @@ RedisExecutor::ExecutionOutcome
 RedisExecutor::execute_blpop(std::span<std::string const> args,
                              CommandContext ctx)
 {
-  for (auto const &key: args) {
+  auto const conversion_res{to_double(args.back())};
+  if (!conversion_res.has_value()) {
+    return ExecutionOutcome{ResultType::REPLY,
+                            SimpleError("invalid timeout value")};
+  }
+  std::optional<std::chrono::steady_clock::time_point> timeout_tp;
+  if (conversion_res.value() < 0.0) {
+    return ExecutionOutcome{ResultType::REPLY,
+                            SimpleError("invalid timeout value")};
+  }
+  if (conversion_res.value() > 0.0) {
+    timeout_tp = get_timeout(conversion_res.value());
+  }
+  for (auto const &key: args.subspan(0, args.size() - 1)) {
     auto popped = p_store_->lpop(key, 1);
     if (!popped.has_value()) {
       continue;
@@ -210,9 +285,10 @@ RedisExecutor::execute_blpop(std::span<std::string const> args,
   auto blocked_client{std::make_shared<BlockedClient>(
           ctx.client_fd,
           std::vector<std::string>{args.begin(), args.end()},
-          ctx.callback)};
+          ctx.callback,
+          timeout_tp)};
   blocked_clients_by_fd_.emplace(ctx.client_fd, blocked_client);
-  for (auto const &key: args) {
+  for (auto const &key: args.subspan(0, args.size() - 1)) {
     auto [it, inserted]{blocked_clients_by_key_.try_emplace(key)};
     it->second.emplace_back(blocked_client);
   }
@@ -222,20 +298,20 @@ RedisExecutor::execute_blpop(std::span<std::string const> args,
 std::string RedisExecutor::encode_reply(RedisReply const &reply)
 {
   return std::visit(
-          Overloaded{
-                  [](SimpleString const &val)
-                  { return RespEncoder::encode_simple_string(val.value); },
-                  [](BulkString const &val)
-                  { return RespEncoder::encode_bulk_string(val.value); },
-                  [](NullBulkString const &)
-                  { return RespEncoder::encode_null_string(); },
-                  [](SimpleError const &val)
-                  { return RespEncoder::encode_simple_error(val.value); },
-                  [](Integer const &val)
-                  { return RespEncoder::encode_integer(val.value); },
-                  [](Array const &val)
-                  { return RespEncoder::encode_array(val.values); },
-          },
+          Overloaded{[](SimpleString const &val)
+                     { return RespEncoder::encode_simple_string(val.value); },
+                     [](BulkString const &val)
+                     { return RespEncoder::encode_bulk_string(val.value); },
+                     [](NullBulkString const &)
+                     { return RespEncoder::encode_null_string(); },
+                     [](SimpleError const &val)
+                     { return RespEncoder::encode_simple_error(val.value); },
+                     [](Integer const &val)
+                     { return RespEncoder::encode_integer(val.value); },
+                     [](Array const &val)
+                     { return RespEncoder::encode_array(val.values); },
+                     [](NullArray const &)
+                     { return RespEncoder::encode_null_array(); }},
           reply);
 }
 
@@ -244,10 +320,20 @@ void RedisExecutor::unblock_client_for_key(std::string const &key)
   if (auto const it{blocked_clients_by_key_.find(key)};
       it != blocked_clients_by_key_.cend()) {
     auto &blocked_clients = it->second;
+    auto const now = std::chrono::steady_clock::now();
     while (!blocked_clients.empty()) {
       auto const p_blocked_client{blocked_clients.front().lock()};
       if (!p_blocked_client) {
         blocked_clients.pop_front();
+        continue;
+      }
+
+      if (p_blocked_client->timeout_tp.has_value() &&
+          p_blocked_client->timeout_tp.value() < now) {
+        blocked_clients.pop_front();
+        int const client_fd{p_blocked_client->client_fd};
+        p_blocked_client->callback(encode_reply(NullArray{}));
+        blocked_clients_by_fd_.erase(client_fd);
         continue;
       }
 

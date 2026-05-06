@@ -14,6 +14,12 @@ int main()
     redis_net::EventLoop event_loop;
     auto p_redis_store = std::make_shared<RedisStore>();
     auto p_redis_executor = std::make_shared<RedisExecutor>(p_redis_store);
+    event_loop.set_timer(
+            [p_redis_executor]
+            { return p_redis_executor->get_next_blocked_client_timeout(); },
+            [p_redis_executor](
+                    redis_net::EventLoop::EventLoopClock::time_point const tp)
+            { p_redis_executor->expire_blocked_clients(tp); });
     redis_net::TcpServer server{event_loop, p_redis_executor};
 
     if (auto started{server.start(6379, 5)}; !started) {

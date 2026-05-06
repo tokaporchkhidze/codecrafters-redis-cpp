@@ -42,6 +42,11 @@ public:
 
   void remove_blocked_client(int fd);
 
+  void expire_blocked_clients(std::chrono::steady_clock::time_point now);
+
+  std::optional<std::chrono::steady_clock::time_point>
+  get_next_blocked_client_timeout();
+
 private:
   struct SimpleString
   {
@@ -72,12 +77,17 @@ private:
     std::vector<std::string> values;
   };
 
+  struct NullArray
+  {
+  };
+
   using RedisReply = std::variant<SimpleString,
                                   BulkString,
                                   SimpleError,
                                   Integer,
                                   NullBulkString,
-                                  Array>;
+                                  Array,
+                                  NullArray>;
 
   struct ExecutionOutcome
   {
@@ -108,15 +118,20 @@ private:
   {
     BlockedClient(int const fd,
                   std::vector<std::string> list_keys,
-                  std::function<void(std::string)> reply_callback) :
+                  std::function<void(std::string)> reply_callback,
+                  std::optional<std::chrono::steady_clock::time_point> const
+                          deadline) :
         client_fd(fd),
         keys(std::move(list_keys)),
-        callback(std::move(reply_callback))
+        callback(std::move(reply_callback)),
+        timeout_tp(deadline)
     {
     }
+
     int client_fd;
     std::vector<std::string> keys;
     ReplyCallback callback;
+    std::optional<std::chrono::steady_clock::time_point> timeout_tp;
   };
 
   // For enabling, looking up commands with string_view_s.

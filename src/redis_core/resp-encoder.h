@@ -18,6 +18,7 @@ public:
   static std::string encode_simple_error(std::string_view message);
   static std::string encode_integer(std::int64_t value);
   static std::string encode_array(std::vector<std::string> const &values);
+  static std::string encode_null_array();
 
 private:
   static std::string constexpr s_terminator{"\r\n"};

@@ -1,6 +1,6 @@
-
 #ifndef REDIS_CPP_EVENT_LOOP_H
 #define REDIS_CPP_EVENT_LOOP_H
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <system_error>
@@ -20,6 +20,10 @@ public:
     std::function<void(std::error_code)> on_error;
   };
 
+  using EventLoopClock = std::chrono::steady_clock;
+  using TimeoutProvider = std::function<std::optional<EventLoopClock::time_point>()>;
+  using TimeoutCallback = std::function<void(EventLoopClock::time_point)>;
+
   EventLoop();
   ~EventLoop() noexcept;
 
@@ -31,10 +35,15 @@ public:
   void remove(int fd);
   void run();
   void stop();
+  void set_timer(TimeoutProvider timeout_provider, TimeoutCallback timeout_callback);
 private:
   std::unordered_map<int, Handler> handlers_{};
   int epoll_fd_{-1};
   bool running_{false};
+  TimeoutProvider timeout_provider_;
+  TimeoutCallback timeout_callback_;
+
+  int get_epoll_timeout_ms() const;
 };
 
 } // namespace redis_net
