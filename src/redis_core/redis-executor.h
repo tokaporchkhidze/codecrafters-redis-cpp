@@ -1,6 +1,9 @@
 #ifndef REDIS_CPP_REDIS_EXECUTOR_H
 #define REDIS_CPP_REDIS_EXECUTOR_H
 
+#include <functional>
+#include <memory>
+#include <queue>
 #include <string>
 
 #include <variant>
@@ -13,9 +16,31 @@ namespace redis_core
 class RedisExecutor
 {
 public:
+  enum class ResultType
+  {
+    REPLY = 0,
+    BLOCKED,
+  };
+
+  using ReplyCallback = std::function<void(std::string)>;
+
+  struct CommandContext
+  {
+    int client_fd;
+    ReplyCallback callback;
+  };
+
+  struct ExecutionResult
+  {
+    ResultType type;
+    std::string reply;
+  };
+
   explicit RedisExecutor(redis_storage::RedisStorePtr p_redis_store);
 
-  std::string execute(RedisCommand const &cmd);
+  ExecutionResult execute(RedisCommand const &cmd, CommandContext ctx);
+
+  void remove_blocked_client(int fd);
 
 private:
   struct SimpleString
@@ -53,8 +78,15 @@ private:
                                   Integer,
                                   NullBulkString,
                                   Array>;
-  using Handler =
-          RedisReply (RedisExecutor::*)(std::span<std::string const> args);
+
+  struct ExecutionOutcome
+  {
+    ResultType type;
+    RedisReply reply;
+  };
+
+  using Handler = ExecutionOutcome (RedisExecutor::*)(
+          std::span<std::string const> args, CommandContext ctx);
 
   struct CommandSpec
   {
@@ -72,6 +104,21 @@ private:
     Handler handler{};
   };
 
+  struct BlockedClient
+  {
+    BlockedClient(int const fd,
+                  std::vector<std::string> list_keys,
+                  std::function<void(std::string)> reply_callback) :
+        client_fd(fd),
+        keys(std::move(list_keys)),
+        callback(std::move(reply_callback))
+    {
+    }
+    int client_fd;
+    std::vector<std::string> keys;
+    ReplyCallback callback;
+  };
+
   // For enabling, looking up commands with string_view_s.
   struct StringHash
   {
@@ -86,22 +133,38 @@ private:
   using CommandHandlers = std::
           unordered_map<std::string, CommandSpec, StringHash, std::equal_to<>>;
 
-
-  RedisReply execute_ping(std::span<std::string const> args);
-  RedisReply execute_set(std::span<std::string const> args);
-  RedisReply execute_get(std::span<std::string const> args);
-  RedisReply execute_echo(std::span<std::string const> args);
-  RedisReply execute_rpush(std::span<std::string const> args);
-  RedisReply execute_lpush(std::span<std::string const> args);
-  RedisReply execute_llen(std::span<std::string const> args);
-  RedisReply execute_lrange(std::span<std::string const> args);
-  RedisReply execute_lpop(std::span<std::string const> args);
+  ExecutionOutcome execute_ping(std::span<std::string const> args,
+                                CommandContext ctx);
+  ExecutionOutcome execute_set(std::span<std::string const> args,
+                               CommandContext ctx);
+  ExecutionOutcome execute_get(std::span<std::string const> args,
+                               CommandContext ctx);
+  ExecutionOutcome execute_echo(std::span<std::string const> args,
+                                CommandContext ctx);
+  ExecutionOutcome execute_rpush(std::span<std::string const> args,
+                                 CommandContext ctx);
+  ExecutionOutcome execute_lpush(std::span<std::string const> args,
+                                 CommandContext ctx);
+  ExecutionOutcome execute_llen(std::span<std::string const> args,
+                                CommandContext ctx);
+  ExecutionOutcome execute_lrange(std::span<std::string const> args,
+                                  CommandContext ctx);
+  ExecutionOutcome execute_lpop(std::span<std::string const> args,
+                                CommandContext ctx);
+  ExecutionOutcome execute_blpop(std::span<std::string const> args,
+                                 CommandContext ctx);
 
   std::string encode_reply(RedisReply const &reply);
+
+  void unblock_client_for_key(std::string const &key);
 
 
   redis_storage::RedisStorePtr p_store_;
   CommandHandlers handlers_;
+  std::unordered_map<std::string, std::deque<std::weak_ptr<BlockedClient>>>
+          blocked_clients_by_key_;
+  std::unordered_map<int, std::shared_ptr<BlockedClient>>
+          blocked_clients_by_fd_;
 };
 
 using RedisExecutorPtr = std::shared_ptr<RedisExecutor>;

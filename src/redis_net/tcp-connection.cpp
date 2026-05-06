@@ -86,7 +86,25 @@ void TcpConnection::handle_read()
             std::println("Received: {}", arg);
           }
           RedisCommand cmd(args);
-          queue_response(p_redis_executor_->execute(cmd));
+          auto self_weak{weak_from_this()};
+          const auto [type, reply]{p_redis_executor_->execute(
+                  cmd,
+                  RedisExecutor::CommandContext{
+                          fd_,
+                          [self_weak](std::string const &response)
+                          {
+                            if (auto const self{self_weak.lock()}; self)
+                              self->queue_response(response);
+                          }})};
+          if (type == RedisExecutor::ResultType::REPLY) {
+            queue_response(reply);
+          } else {
+            event_loop_.modify(fd_, EPOLLRDHUP);
+            // if client pipelined multiple commands,
+            // let's stop after first blocking command,
+            // only continue after unblocking happened.
+            return;
+          }
         }
       }
       continue;
@@ -126,6 +144,7 @@ void TcpConnection::handle_close()
 {
   int const closed_fd{fd_};
   close_connection();
+  p_redis_executor_->remove_blocked_client(closed_fd);
   if (on_close_) {
     on_close_(closed_fd);
   }
