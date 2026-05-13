@@ -58,6 +58,7 @@ RedisExecutor::RedisExecutor(RedisStorePtr p_redis_store) :
   handlers_.try_emplace("LPOP", 1, 2, &RedisExecutor::execute_lpop);
   handlers_.try_emplace(
           "BLPOP", 2, std::nullopt, &RedisExecutor::execute_blpop);
+  handlers_.try_emplace("TYPE", 1, 1, &RedisExecutor::execute_type);
 }
 
 RedisExecutor::ExecutionResult RedisExecutor::execute(RedisCommand const &cmd,
@@ -293,6 +294,14 @@ RedisExecutor::execute_blpop(std::span<std::string const> args,
     it->second.emplace_back(blocked_client);
   }
   return ExecutionOutcome{ResultType::BLOCKED, NullBulkString{}};
+}
+
+RedisExecutor::ExecutionOutcome
+RedisExecutor::execute_type(std::span<std::string const> const args,
+                            CommandContext)
+{
+  return ExecutionOutcome{ResultType::REPLY,
+                          SimpleString{p_store_->get_type(args[0])}};
 }
 
 std::string RedisExecutor::encode_reply(RedisReply const &reply)

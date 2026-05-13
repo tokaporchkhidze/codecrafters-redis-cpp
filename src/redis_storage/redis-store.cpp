@@ -115,6 +115,19 @@ RedisStore::lpop(std::string const &key, int64_t const count)
   return removed_elements;
 }
 
+std::string RedisStore::get_type(std::string const &key)
+{
+  if (auto const it{map_.find(key)}; it != map_.cend()) {
+    if (std::holds_alternative<List>(it->second.value)) {
+      return "list";
+    }
+    if (std::holds_alternative<std::string>(it->second.value)) {
+      return "string";
+    }
+  }
+  return "none";
+}
+
 
 std::expected<std::reference_wrapper<RedisStore::List>, RedisStore::StoreError>
 RedisStore::get_or_create_list(std::string const &key)
