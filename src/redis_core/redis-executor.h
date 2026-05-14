@@ -169,7 +169,9 @@ private:
   ExecutionOutcome execute_blpop(std::span<std::string const> args,
                                  CommandContext ctx);
   ExecutionOutcome execute_type(std::span<std::string const> args,
-                                 CommandContext ctx);
+                                CommandContext ctx);
+  ExecutionOutcome execute_xadd(std::span<std::string const> args,
+                                CommandContext ctx);
 
   std::string encode_reply(RedisReply const &reply);
 

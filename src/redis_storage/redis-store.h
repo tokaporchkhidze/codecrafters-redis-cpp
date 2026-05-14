@@ -7,6 +7,7 @@
 #include <memory>
 #include <unordered_map>
 #include <variant>
+#include "redis-stream.h"
 
 
 namespace redis_storage
@@ -19,6 +20,7 @@ public:
   {
     WRONG_TYPE = 0,
     KEY_NOT_FOUND,
+    STREAM_ERROR,
   };
 
   struct SetOptions
@@ -47,9 +49,14 @@ public:
 
   std::string get_type(std::string const &key);
 
+  std::expected<std::string, StoreError>
+  xadd(std::string const &key,
+       std::span<std::pair<std::string, std::string> const> fields,
+       std::string const &requested_id);
+
 private:
   using List = std::deque<std::string>;
-  using ValueType = std::variant<std::string, List>;
+  using ValueType = std::variant<std::string, List, RedisStream>;
 
   struct RedisValue
   {
@@ -90,6 +97,10 @@ private:
 
     return static_cast<int64_t>(items.size());
   }
+
+  std::expected<std::reference_wrapper<RedisStream>, StoreError>
+  get_or_create_stream(std::string const &key);
+
 };
 
 using RedisStorePtr = std::shared_ptr<RedisStore>;

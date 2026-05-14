@@ -59,6 +59,7 @@ RedisExecutor::RedisExecutor(RedisStorePtr p_redis_store) :
   handlers_.try_emplace(
           "BLPOP", 2, std::nullopt, &RedisExecutor::execute_blpop);
   handlers_.try_emplace("TYPE", 1, 1, &RedisExecutor::execute_type);
+  handlers_.try_emplace("XADD", 4, std::nullopt, &RedisExecutor::execute_xadd);
 }
 
 RedisExecutor::ExecutionResult RedisExecutor::execute(RedisCommand const &cmd,
@@ -302,6 +303,24 @@ RedisExecutor::execute_type(std::span<std::string const> const args,
 {
   return ExecutionOutcome{ResultType::REPLY,
                           SimpleString{p_store_->get_type(args[0])}};
+}
+
+RedisExecutor::ExecutionOutcome
+RedisExecutor::execute_xadd(std::span<std::string const> const args,
+                            CommandContext)
+{
+  std::vector<std::pair<std::string, std::string>> fields;
+  if (args.size() % 2 != 0) {
+    return ExecutionOutcome{ResultType::REPLY,
+                            SimpleError("Invalid number of arguments")};
+  }
+  for (auto i = 2; i < args.size(); i += 2) {
+    fields.emplace_back(args[i], args[i + 1]);
+  }
+  if (auto const id{p_store_->xadd(args[0], fields, args[1])}; id.has_value()) {
+    return ExecutionOutcome{ResultType::REPLY, BulkString(id.value())};
+  }
+  return ExecutionOutcome{ResultType::REPLY, SimpleError("Failed to add")};
 }
 
 std::string RedisExecutor::encode_reply(RedisReply const &reply)

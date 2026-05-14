@@ -124,8 +124,28 @@ std::string RedisStore::get_type(std::string const &key)
     if (std::holds_alternative<std::string>(it->second.value)) {
       return "string";
     }
+    if (std::holds_alternative<RedisStream>(it->second.value)) {
+      return "stream";
+    }
   }
   return "none";
+}
+std::expected<std::string, RedisStore::StoreError> RedisStore::xadd(
+        std::string const &key,
+        std::span<std::pair<std::string, std::string> const> const fields,
+        std::string const &requested_id)
+{
+  return get_or_create_stream(key).and_then(
+          [&](std::reference_wrapper<RedisStream> const stream)
+                  -> std::expected<std::string, StoreError>
+          {
+            auto result = requested_id == "*"
+                                  ? stream.get().add(fields)
+                                  : stream.get().add(requested_id, fields);
+
+            return result.transform_error([](std::string const &)
+                                          { return StoreError::STREAM_ERROR; });
+          });
 }
 
 
@@ -154,4 +174,21 @@ RedisStore::get_or_create_list(std::string const &key)
   }
 
   return std::ref(std::get<List>(it->second.value));
+}
+
+std::expected<std::reference_wrapper<RedisStream>, RedisStore::StoreError>
+RedisStore::get_or_create_stream(std::string const &key)
+{
+  auto [it, inserted] = map_.try_emplace(key,
+                                         RedisValue{
+                                                 RedisStream{},
+                                                 std::nullopt,
+                                         });
+  if (inserted) {
+    return std::ref(std::get<RedisStream>(it->second.value));
+  }
+  if (!std::holds_alternative<RedisStream>(it->second.value)) {
+    return std::unexpected(StoreError::WRONG_TYPE);
+  }
+  return std::ref(std::get<RedisStream>(it->second.value));
 }

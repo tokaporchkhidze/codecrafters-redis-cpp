@@ -1,0 +1,55 @@
+#ifndef REDIS_CPP_REDIS_STREAM_H
+#define REDIS_CPP_REDIS_STREAM_H
+
+#include <map>
+#include <string>
+#include <vector>
+#include <expected>
+#include <span>
+
+namespace redis_storage
+{
+
+struct StreamId
+{
+  int64_t milliseconds{};
+  int64_t sequence{};
+
+  auto operator<=>(StreamId const &) const = default;
+
+  static std::expected<StreamId, std::string> parse(std::string_view value);
+  [[nodiscard]] std::string to_string() const;
+};
+
+struct StreamEntry
+{
+  StreamId id;
+  std::vector<std::pair<std::string, std::string>> fields;
+};
+
+class RedisStream
+{
+public:
+  std::expected<std::string, std::string>
+  add(std::string_view requested_id,
+      std::span<std::pair<std::string, std::string> const> fields);
+
+  std::expected<std::string, std::string>
+  add(std::span<std::pair<std::string, std::string> const> fields);
+
+  // [[nodiscard]] std::vector<StreamEntry> range(StreamId start,
+  //                                              StreamId end) const;
+
+private:
+  std::map<StreamId, StreamEntry> entries_;
+
+  std::expected<StreamId, std::string>
+  add_(StreamId stream_id,
+       std::span<std::pair<std::string, std::string> const> fields);
+
+  [[nodiscard]] StreamId get_next_id() const;
+};
+
+} // namespace redis_storage
+
+#endif // REDIS_CPP_REDIS_STREAM_H
