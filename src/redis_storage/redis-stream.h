@@ -48,8 +48,11 @@ private:
        std::span<std::pair<std::string, std::string> const> fields);
 
   [[nodiscard]] StreamId get_next_id() const;
+
   [[nodiscard]] std::expected<StreamId, std::string>
   validate_requested_id(StreamId stream_id) const;
+
+  void auto_generate_stream_id(StreamId &stream_id);
 };
 
 } // namespace redis_storage
