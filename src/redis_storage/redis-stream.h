@@ -1,11 +1,11 @@
 #ifndef REDIS_CPP_REDIS_STREAM_H
 #define REDIS_CPP_REDIS_STREAM_H
 
+#include <expected>
 #include <map>
+#include <span>
 #include <string>
 #include <vector>
-#include <expected>
-#include <span>
 
 namespace redis_storage
 {
@@ -48,6 +48,8 @@ private:
        std::span<std::pair<std::string, std::string> const> fields);
 
   [[nodiscard]] StreamId get_next_id() const;
+  [[nodiscard]] std::expected<StreamId, std::string>
+  validate_requested_id(StreamId stream_id) const;
 };
 
 } // namespace redis_storage

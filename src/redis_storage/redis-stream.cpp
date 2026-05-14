@@ -26,7 +26,8 @@ std::expected<int64_t, std::string> parse_id_part(std::string_view const value)
 
 } // namespace
 
-std::expected<StreamId, std::string> StreamId::parse(std::string_view const value)
+std::expected<StreamId, std::string>
+StreamId::parse(std::string_view const value)
 {
   auto const delimiter_pos = value.find('-');
   if (delimiter_pos == std::string_view::npos ||
@@ -38,12 +39,16 @@ std::expected<StreamId, std::string> StreamId::parse(std::string_view const valu
   auto const sequence_part = value.substr(delimiter_pos + 1);
 
   return parse_id_part(milliseconds_part)
-          .and_then([sequence_part](int64_t const milliseconds) {
-            return parse_id_part(sequence_part)
-                    .transform([milliseconds](int64_t const sequence) {
-                      return StreamId{milliseconds, sequence};
-                    });
-          });
+          .and_then(
+                  [sequence_part](int64_t const milliseconds)
+                  {
+                    return parse_id_part(sequence_part)
+                            .transform(
+                                    [milliseconds](int64_t const sequence)
+                                    {
+                                      return StreamId{milliseconds, sequence};
+                                    });
+                  });
 }
 
 std::string StreamId::to_string() const
@@ -56,32 +61,39 @@ std::expected<std::string, std::string> RedisStream::add(
         std::span<std::pair<std::string, std::string> const> const fields)
 {
   return StreamId::parse(requested_id)
-          .and_then([this, fields](StreamId const stream_id) {
-            return add_(stream_id, fields)
-                    .transform([](StreamId const inserted_id) {
-                      return inserted_id.to_string();
-                    });
-          });
+          .and_then([this](StreamId const stream_id)
+                    { return validate_requested_id(stream_id); })
+          .and_then(
+                  [this, fields](StreamId const stream_id)
+                          -> std::expected<std::string, std::string>
+                  {
+                    return add_(stream_id, fields)
+                            .transform([](StreamId const inserted_id)
+                                       { return inserted_id.to_string(); });
+                  });
 }
 
 std::expected<std::string, std::string>
 RedisStream::add(std::span<std::pair<std::string, std::string> const> fields)
 {
-  return add_(get_next_id(), fields).transform([](StreamId const inserted_id) {
-    return inserted_id.to_string();
-  });
+  return add_(get_next_id(), fields)
+          .transform([](StreamId const inserted_id)
+                     { return inserted_id.to_string(); });
 }
 
 std::expected<StreamId, std::string> RedisStream::add_(
         StreamId const stream_id,
         std::span<std::pair<std::string, std::string> const> const fields)
 {
-  auto const inserted = entries_.try_emplace(
-          stream_id,
-          StreamEntry{stream_id,
-                      std::vector<std::pair<std::string, std::string>>{
-                              fields.begin(), fields.end()}})
-                                .second;
+  auto const inserted =
+          entries_.try_emplace(
+                          stream_id,
+                          StreamEntry{
+                                  stream_id,
+                                  std::vector<
+                                          std::pair<std::string, std::string>>{
+                                          fields.begin(), fields.end()}})
+                  .second;
   if (!inserted) {
     return std::unexpected("stream entry with given ID already exists");
   }
@@ -103,4 +115,19 @@ StreamId RedisStream::get_next_id() const
   }
 
   return StreamId{milliseconds, sequence + 1};
+}
+
+std::expected<StreamId, std::string>
+RedisStream::validate_requested_id(StreamId const stream_id) const
+{
+  if (stream_id == StreamId{0, 0}) {
+    return std::unexpected("ERR The ID specified in XADD must be greater than 0-0");
+  }
+
+  if (!entries_.empty() && stream_id <= entries_.crbegin()->first) {
+    return std::unexpected("ERR The ID specified in XADD is equal or smaller than "
+                           "the target stream top item");
+  }
+
+  return stream_id;
 }

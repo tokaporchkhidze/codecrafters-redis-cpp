@@ -20,7 +20,6 @@ public:
   {
     WRONG_TYPE = 0,
     KEY_NOT_FOUND,
-    STREAM_ERROR,
   };
 
   struct SetOptions
@@ -49,7 +48,7 @@ public:
 
   std::string get_type(std::string const &key);
 
-  std::expected<std::string, StoreError>
+  std::expected<std::string, std::string>
   xadd(std::string const &key,
        std::span<std::pair<std::string, std::string> const> fields,
        std::string const &requested_id);

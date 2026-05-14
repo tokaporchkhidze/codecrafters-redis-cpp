@@ -319,8 +319,9 @@ RedisExecutor::execute_xadd(std::span<std::string const> const args,
   }
   if (auto const id{p_store_->xadd(args[0], fields, args[1])}; id.has_value()) {
     return ExecutionOutcome{ResultType::REPLY, BulkString(id.value())};
+  } else {
+    return ExecutionOutcome{ResultType::REPLY, SimpleError(id.error())};
   }
-  return ExecutionOutcome{ResultType::REPLY, SimpleError("Failed to add")};
 }
 
 std::string RedisExecutor::encode_reply(RedisReply const &reply)

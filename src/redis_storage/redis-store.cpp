@@ -130,22 +130,20 @@ std::string RedisStore::get_type(std::string const &key)
   }
   return "none";
 }
-std::expected<std::string, RedisStore::StoreError> RedisStore::xadd(
+std::expected<std::string, std::string> RedisStore::xadd(
         std::string const &key,
         std::span<std::pair<std::string, std::string> const> const fields,
         std::string const &requested_id)
 {
-  return get_or_create_stream(key).and_then(
-          [&](std::reference_wrapper<RedisStream> const stream)
-                  -> std::expected<std::string, StoreError>
-          {
-            auto result = requested_id == "*"
-                                  ? stream.get().add(fields)
-                                  : stream.get().add(requested_id, fields);
+  auto const stream = get_or_create_stream(key);
+  if (!stream.has_value()) {
+    return std::unexpected("Wrong type");
+  }
 
-            return result.transform_error([](std::string const &)
-                                          { return StoreError::STREAM_ERROR; });
-          });
+  if (requested_id == "*") {
+    return stream->get().add(fields);
+  }
+  return stream->get().add(requested_id, fields);
 }
 
 
