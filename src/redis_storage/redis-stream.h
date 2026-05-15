@@ -37,8 +37,8 @@ public:
   std::expected<std::string, std::string>
   add(std::span<std::pair<std::string, std::string> const> fields);
 
-  // [[nodiscard]] std::vector<StreamEntry> range(StreamId start,
-  //                                              StreamId end) const;
+  [[nodiscard]] std::expected<std::vector<StreamEntry>, std::string>
+  range(std::string_view start, std::string_view end) const;
 
 private:
   std::map<StreamId, StreamEntry> entries_;

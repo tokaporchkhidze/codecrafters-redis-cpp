@@ -53,6 +53,10 @@ public:
        std::span<std::pair<std::string, std::string> const> fields,
        std::string const &requested_id);
 
+  std::expected<std::vector<StreamEntry>, std::string> xrange(std::string const &key,
+                                                 std::string const &start,
+                                                 std::string const &end);
+
 private:
   using List = std::deque<std::string>;
   using ValueType = std::variant<std::string, List, RedisStream>;
@@ -99,7 +103,6 @@ private:
 
   std::expected<std::reference_wrapper<RedisStream>, StoreError>
   get_or_create_stream(std::string const &key);
-
 };
 
 using RedisStorePtr = std::shared_ptr<RedisStore>;

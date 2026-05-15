@@ -146,6 +146,20 @@ std::expected<std::string, std::string> RedisStore::xadd(
   return stream->get().add(requested_id, fields);
 }
 
+std::expected<std::vector<StreamEntry>, std::string>
+RedisStore::xrange(std::string const &key,
+                   std::string const &start,
+                   std::string const &end)
+{
+  if (auto const it{map_.find(key)}; it == map_.cend()) {
+    return std::vector<StreamEntry>{};
+  } else if (!std::holds_alternative<RedisStream>(it->second.value)) {
+    return std::unexpected("Wrong type");
+  } else {
+    return std::get<RedisStream>(it->second.value).range(start, end);
+  }
+}
+
 
 std::expected<std::reference_wrapper<RedisStore::List>, RedisStore::StoreError>
 RedisStore::get_or_create_list(std::string const &key)

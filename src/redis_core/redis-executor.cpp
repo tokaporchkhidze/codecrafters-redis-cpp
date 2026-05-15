@@ -60,6 +60,7 @@ RedisExecutor::RedisExecutor(RedisStorePtr p_redis_store) :
           "BLPOP", 2, std::nullopt, &RedisExecutor::execute_blpop);
   handlers_.try_emplace("TYPE", 1, 1, &RedisExecutor::execute_type);
   handlers_.try_emplace("XADD", 4, std::nullopt, &RedisExecutor::execute_xadd);
+  handlers_.try_emplace("XRANGE", 3, 3, &RedisExecutor::execute_xrange);
 }
 
 RedisExecutor::ExecutionResult RedisExecutor::execute(RedisCommand const &cmd,
@@ -220,10 +221,16 @@ RedisExecutor::ExecutionOutcome
 RedisExecutor::execute_lrange(std::span<std::string const> const args,
                               CommandContext)
 {
+  auto elements{
+          p_store_->lrange(args[0], std::stoll(args[1]), std::stoll(args[2]))};
+  auto values = elements |
+                std::views::transform(
+                        [](std::string &element)
+                        { return RedisReply(BulkString(std::move(element))); });
+
   return ExecutionOutcome{
           ResultType::REPLY,
-          Array(std::move(p_store_->lrange(
-                  args[0], std::stoll(args[1]), std::stoll(args[2]))))};
+          Array(std::ranges::to<std::vector<RedisReply>>(values))};
 }
 
 RedisExecutor::ExecutionOutcome
@@ -248,7 +255,14 @@ RedisExecutor::execute_lpop(std::span<std::string const> const args,
   }
 
   if (has_count_arg) {
-    return ExecutionOutcome{ResultType::REPLY, Array(std::move(elements))};
+    auto values =
+            elements |
+            std::views::transform(
+                    [](std::string &element)
+                    { return RedisReply(BulkString(std::move(element))); });
+    return ExecutionOutcome{
+            ResultType::REPLY,
+            Array(std::ranges::to<std::vector<RedisReply>>(values))};
   }
 
   return ExecutionOutcome{ResultType::REPLY,
@@ -281,7 +295,9 @@ RedisExecutor::execute_blpop(std::span<std::string const> args,
     if (elements.empty()) {
       continue;
     }
-    return ExecutionOutcome{ResultType::REPLY, Array({key, elements.front()})};
+    return ExecutionOutcome{
+            ResultType::REPLY,
+            Array({BulkString(key), BulkString(elements.front())})};
   }
   // If we get here, means no pop happened, need to block.
   auto blocked_client{std::make_shared<BlockedClient>(
@@ -324,6 +340,38 @@ RedisExecutor::execute_xadd(std::span<std::string const> const args,
   }
 }
 
+RedisExecutor::ExecutionOutcome
+RedisExecutor::execute_xrange(std::span<std::string const> const args,
+                              CommandContext)
+{
+  auto const entries_res{p_store_->xrange(args[0], args[1], args[2])};
+  if (!entries_res.has_value()) {
+    return ExecutionOutcome{ResultType::REPLY,
+                            SimpleError(entries_res.error())};
+  }
+
+  std::vector<RedisReply> entries_reply;
+  entries_reply.reserve(entries_res.value().size());
+
+  for (auto const &entry: entries_res.value()) {
+    std::vector<RedisReply> fields_reply;
+    fields_reply.reserve(entry.fields.size() * 2);
+    for (auto const &[field, value]: entry.fields) {
+      fields_reply.emplace_back(BulkString(field));
+      fields_reply.emplace_back(BulkString(value));
+    }
+
+    std::vector<RedisReply> entry_reply;
+    entry_reply.reserve(2);
+    entry_reply.emplace_back(BulkString(entry.id.to_string()));
+    entry_reply.emplace_back(Array{std::move(fields_reply)});
+
+    entries_reply.emplace_back(Array{std::move(entry_reply)});
+  }
+
+  return ExecutionOutcome{ResultType::REPLY, Array{std::move(entries_reply)}};
+}
+
 std::string RedisExecutor::encode_reply(RedisReply const &reply)
 {
   return std::visit(
@@ -337,11 +385,18 @@ std::string RedisExecutor::encode_reply(RedisReply const &reply)
                      { return RespEncoder::encode_simple_error(val.value); },
                      [](Integer const &val)
                      { return RespEncoder::encode_integer(val.value); },
-                     [](Array const &val)
-                     { return RespEncoder::encode_array(val.values); },
+                     [this](Array const &val)
+                     {
+                       std::vector<std::string> encoded_elements;
+                       encoded_elements.reserve(val.values.size());
+                       for (auto const &element: val.values) {
+                         encoded_elements.emplace_back(encode_reply(element));
+                       }
+                       return RespEncoder::encode_array(encoded_elements);
+                     },
                      [](NullArray const &)
                      { return RespEncoder::encode_null_array(); }},
-          reply);
+          reply.value);
 }
 
 void RedisExecutor::unblock_client_for_key(std::string const &key)
@@ -373,8 +428,8 @@ void RedisExecutor::unblock_client_for_key(std::string const &key)
 
       blocked_clients.pop_front();
       int const client_fd{p_blocked_client->client_fd};
-      p_blocked_client->callback(
-              encode_reply(Array({key, popped.value().front()})));
+      p_blocked_client->callback(encode_reply(
+              Array({BulkString(key), BulkString(popped.value().front())})));
       blocked_clients_by_fd_.erase(client_fd);
     }
 

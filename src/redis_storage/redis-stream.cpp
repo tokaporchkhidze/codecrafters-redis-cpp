@@ -2,6 +2,7 @@
 
 #include <charconv>
 #include <chrono>
+#include <ranges>
 
 using namespace redis_storage;
 
@@ -92,6 +93,60 @@ RedisStream::add(std::span<std::pair<std::string, std::string> const> fields)
   return add_(get_next_id(), fields)
           .transform([](StreamId const inserted_id)
                      { return inserted_id.to_string(); });
+}
+
+std::expected<std::vector<StreamEntry>, std::string>
+RedisStream::range(std::string_view start, std::string_view end) const
+{
+  if (entries_.empty()) {
+    return std::vector<StreamEntry>{};
+  }
+  StreamId start_id;
+  StreamId end_id;
+  if (start == "-") {
+    start_id = StreamId{0, 0};
+  } else {
+    auto const start_id_res = StreamId::parse(start).or_else(
+            [start](std::string const &)
+            {
+              return parse_id_part(start).transform(
+                      [](int64_t const ms) { return StreamId{ms, 0}; });
+            });
+    if (!start_id_res.has_value()) {
+      return std::unexpected(start_id_res.error());
+    }
+    start_id = start_id_res.value();
+  }
+
+  if (end == "+") {
+    end_id = StreamId{std::numeric_limits<int64_t>::max(),
+                      std::numeric_limits<int64_t>::max()};
+  } else {
+    auto const end_id_res = StreamId::parse(end).or_else(
+            [end](std::string const &)
+            {
+              return parse_id_part(end).transform(
+                      [](int64_t const ms)
+                      {
+                        return StreamId{
+                                ms,
+                                std::int64_t{
+                                        std::numeric_limits<int64_t>::max()}};
+                      });
+            });
+    if (!end_id_res.has_value()) {
+      return std::unexpected(end_id_res.error());
+    }
+    end_id = end_id_res.value();
+  }
+
+  auto const start_it{entries_.lower_bound(start_id)};
+  auto const end_it{entries_.upper_bound(end_id)};
+  if (start_it == entries_.cend() || start_it == end_it) {
+    return std::vector<StreamEntry>{};
+  }
+  auto entries{std::ranges::subrange(start_it, end_it) | std::views::values};
+  return std::ranges::to<std::vector<StreamEntry>>(entries);
 }
 
 std::expected<StreamId, std::string> RedisStream::add_(

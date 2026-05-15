@@ -72,26 +72,39 @@ private:
     int64_t value;
   };
 
+  struct RedisReply;
+
   struct Array
   {
-    std::vector<std::string> values;
+    std::vector<RedisReply> values;
   };
 
   struct NullArray
   {
   };
 
-  using RedisReply = std::variant<SimpleString,
-                                  BulkString,
-                                  SimpleError,
-                                  Integer,
-                                  NullBulkString,
-                                  Array,
-                                  NullArray>;
+  struct RedisReply
+  {
+    using Value = std::variant<SimpleString,
+                               BulkString,
+                               SimpleError,
+                               Integer,
+                               NullBulkString,
+                               Array,
+                               NullArray>;
+
+    Value value;
+
+    // Not adding explicit keyword intentionally.
+    template<class T>
+    RedisReply(T reply) : value(std::move(reply))
+    {
+    }
+  };
 
   struct ExecutionOutcome
   {
-    ResultType type;
+    ResultType type{};
     RedisReply reply;
   };
 
@@ -172,6 +185,8 @@ private:
                                 CommandContext ctx);
   ExecutionOutcome execute_xadd(std::span<std::string const> args,
                                 CommandContext ctx);
+  ExecutionOutcome execute_xrange(std::span<std::string const> args,
+                                  CommandContext ctx);
 
   std::string encode_reply(RedisReply const &reply);
 
