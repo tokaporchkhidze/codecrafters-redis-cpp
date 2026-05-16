@@ -175,7 +175,7 @@ RedisStream::read(std::string_view start) const
     return std::unexpected(start_id_res.error());
   }
   auto const start_id = start_id_res.value();
-  auto const it{entries_.lower_bound(start_id)};
+  auto const it{entries_.upper_bound(start_id)};
   if (it == entries_.cend()) {
     return std::vector<StreamEntry>{};
   }

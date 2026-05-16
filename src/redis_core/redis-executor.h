@@ -1,6 +1,7 @@
 #ifndef REDIS_CPP_REDIS_EXECUTOR_H
 #define REDIS_CPP_REDIS_EXECUTOR_H
 
+#include <expected>
 #include <functional>
 #include <memory>
 #include <queue>
@@ -8,6 +9,7 @@
 
 #include <variant>
 #include "redis-command.h"
+#include "redis-executor.h"
 #include "redis_storage/redis-store.h"
 
 namespace redis_core
@@ -85,7 +87,8 @@ private:
 
   struct RedisReply
   {
-    using Value = std::variant<SimpleString,
+    using Value = std::variant<std::monostate,
+                               SimpleString,
                                BulkString,
                                SimpleError,
                                Integer,
@@ -108,6 +111,21 @@ private:
     RedisReply reply;
   };
 
+  struct XReadOptions
+  {
+    bool blocking{};
+    std::optional<std::chrono::steady_clock::time_point> timeout_tp;
+    std::span<std::string const> stream_args;
+  };
+
+  struct XReadRequest
+  {
+    bool blocking{};
+    std::optional<std::chrono::steady_clock::time_point> timeout_tp;
+    std::vector<std::string> stream_keys;
+    std::vector<std::string> start_ids;
+  };
+
   using Handler = ExecutionOutcome (RedisExecutor::*)(
           std::span<std::string const> args, CommandContext ctx);
 
@@ -127,17 +145,35 @@ private:
     Handler handler{};
   };
 
+  struct BlockedClient;
+
+  enum class UnblockOpStatus
+  {
+    READY,
+    NOT_READY_CONTINUE,
+    NOT_READY_STOP,
+  };
+
+  struct UnblockOpResult
+  {
+    UnblockOpStatus status{};
+    RedisReply reply{std::monostate{}};
+  };
+
+  using UnblockOp = std::function<UnblockOpResult(std::string const &,
+                                                  BlockedClient const &)>;
+
   struct BlockedClient
   {
-    BlockedClient(int const fd,
-                  std::vector<std::string> list_keys,
-                  std::function<void(std::string)> reply_callback,
-                  std::optional<std::chrono::steady_clock::time_point> const
-                          deadline) :
+    BlockedClient(
+            int const fd,
+            std::function<void(std::string)> reply_callback,
+            std::optional<std::chrono::steady_clock::time_point> const deadline,
+            UnblockOp op) :
         client_fd(fd),
-        keys(std::move(list_keys)),
         callback(std::move(reply_callback)),
-        timeout_tp(deadline)
+        timeout_tp(deadline),
+        unblock_op(std::move(op))
     {
     }
 
@@ -145,6 +181,7 @@ private:
     std::vector<std::string> keys;
     ReplyCallback callback;
     std::optional<std::chrono::steady_clock::time_point> timeout_tp;
+    UnblockOp unblock_op;
   };
 
   // For enabling, looking up commands with string_view_s.
@@ -190,8 +227,17 @@ private:
   ExecutionOutcome execute_xread(std::span<std::string const> args,
                                  CommandContext ctx);
 
-  RedisReply make_stream_entry_reply(
-          redis_storage::StreamEntry const &entry) const;
+  std::expected<XReadOptions, std::string>
+  parse_xread_options(std::span<std::string const> args) const;
+  std::expected<XReadRequest, std::string>
+  make_xread_request(XReadOptions const &options);
+  std::expected<std::vector<RedisReply>, std::string>
+  read_xread_streams(std::vector<std::string> const &stream_keys,
+                     std::vector<std::string> const &start_ids) const;
+  void block_xread_client(CommandContext ctx, XReadRequest request);
+
+  RedisReply
+  make_stream_entry_reply(redis_storage::StreamEntry const &entry) const;
   RedisReply make_stream_entries_reply(
           std::vector<redis_storage::StreamEntry> const &entries) const;
   RedisReply make_xread_stream_reply(

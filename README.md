@@ -1,33 +1,63 @@
-[![progress-banner](https://backend.codecrafters.io/progress/redis/29a95b85-daf4-430a-984b-ce301fc6e361)](https://app.codecrafters.io/users/codecrafters-bot?r=2qF)
+# Redis Clone in C++
 
-This is a starting point for C++ solutions to the
-["Build Your Own Redis" Challenge](https://codecrafters.io/challenges/redis).
+A small Redis-compatible server built in C++ as part of the CodeCrafters
+"Build Your Own Redis" challenge.
 
-In this challenge, you'll build a toy Redis clone that's capable of handling
-basic commands like `PING`, `SET` and `GET`. Along the way we'll learn about
-event loops, the Redis protocol and more.
+The project implements a TCP server, RESP command parsing, command execution,
+and an in-memory data store for strings, lists, and streams.
 
-**Note**: If you're viewing this repo on GitHub, head over to
-[codecrafters.io](https://codecrafters.io) to try the challenge.
+## Goal
 
-# Passing the first stage
+I started this project to get back into C++ after taking about a year-long break
+from the language.
 
-The entry point for your Redis implementation is in `src/main.cpp`. Study and
-uncomment the relevant code, and push your changes to pass the first stage:
+Redis was also something I was generally curious about. I wanted to understand
+more of its internals by building a smaller version myself: how the protocol is
+parsed, how commands are dispatched, how data structures are represented, and how
+the server handles multiple client connections.
 
-```sh
-git commit -am "pass 1st stage" # any msg
-git push origin master
-```
+## Features
 
-That's all!
+- RESP request parsing and response encoding
+- Non-blocking TCP server using `epoll`
+- In-memory Redis-style storage
+- Multiple client connections
+- String commands:
+   - `PING`
+   - `ECHO`
+   - `SET`
+   - `GET`
+   - `TYPE`
+- Key expiry with `SET key value PX milliseconds`
+- List commands:
+   - `RPUSH`
+   - `LPUSH`
+   - `LLEN`
+   - `LRANGE`
+   - `LPOP`
+   - `BLPOP`
+- Stream commands:
+   - `XADD`
+   - `XRANGE`
+   - `XREAD`
 
-# Stage 2 & beyond
+## Project Structure
 
-Note: This section is for stages 2 and beyond.
+```text
+src/
+  main.cpp                 # Application entry point
 
-1. Ensure you have `cmake` installed locally
-1. Run `./your_program.sh` to run your Redis server, which is implemented in
-   `src/main.cpp`.
-1. Commit your changes and run `git push origin master` to submit your solution
-   to CodeCrafters. Test output will be streamed to your terminal.
+  redis_core/
+    resp-decoder.*         # RESP request parser
+    resp-encoder.*         # RESP response encoder
+    redis-command.*        # Command representation
+    redis-executor.*       # Command dispatch and execution
+
+  redis_net/
+    event-loop.*           # epoll-based event loop
+    tcp-server.*           # TCP server setup and accept loop
+    tcp-connection.*       # Per-client connection handling
+
+  redis_storage/
+    redis-store.*          # In-memory Redis data store
+    redis-stream.*         # Redis stream implementation

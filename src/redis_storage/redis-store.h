@@ -58,7 +58,6 @@ public:
          std::string const &start,
          std::string const &end);
 
-  // TODO: Currently supporting retrieval for one stream only.
   std::expected<std::vector<StreamEntry>, std::string>
   xread(std::string const &key, std::string const &start);
 
