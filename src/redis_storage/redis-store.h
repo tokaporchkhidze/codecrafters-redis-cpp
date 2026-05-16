@@ -53,9 +53,14 @@ public:
        std::span<std::pair<std::string, std::string> const> fields,
        std::string const &requested_id);
 
-  std::expected<std::vector<StreamEntry>, std::string> xrange(std::string const &key,
-                                                 std::string const &start,
-                                                 std::string const &end);
+  std::expected<std::vector<StreamEntry>, std::string>
+  xrange(std::string const &key,
+         std::string const &start,
+         std::string const &end);
+
+  // TODO: Currently supporting retrieval for one stream only.
+  std::expected<std::vector<StreamEntry>, std::string>
+  xread(std::string const &key, std::string const &start);
 
 private:
   using List = std::deque<std::string>;
@@ -103,6 +108,9 @@ private:
 
   std::expected<std::reference_wrapper<RedisStream>, StoreError>
   get_or_create_stream(std::string const &key);
+
+  std::expected<std::reference_wrapper<RedisStream const>, StoreError>
+  find_stream(std::string const &key) const;
 };
 
 using RedisStorePtr = std::shared_ptr<RedisStore>;

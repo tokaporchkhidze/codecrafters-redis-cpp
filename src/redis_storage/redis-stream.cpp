@@ -2,6 +2,7 @@
 
 #include <charconv>
 #include <chrono>
+#include <limits>
 #include <ranges>
 
 using namespace redis_storage;
@@ -25,6 +26,47 @@ std::expected<int64_t, std::string> parse_id_part(std::string_view const value)
   }
 
   return result;
+}
+
+std::expected<StreamId, std::string>
+parse_stream_id_or_milliseconds(std::string_view const value,
+                                int64_t const default_sequence)
+{
+  return StreamId::parse(value).or_else(
+          [value, default_sequence](std::string const &)
+          {
+            return parse_id_part(value).transform(
+                    [default_sequence](int64_t const milliseconds)
+                    { return StreamId{milliseconds, default_sequence}; });
+          });
+}
+
+std::expected<StreamId, std::string>
+parse_range_start_id(std::string_view const value)
+{
+  if (value == "-") {
+    return StreamId{0, 0};
+  }
+
+  return parse_stream_id_or_milliseconds(value, 0);
+}
+
+std::expected<StreamId, std::string>
+parse_range_end_id(std::string_view const value)
+{
+  if (value == "+") {
+    return StreamId{std::numeric_limits<int64_t>::max(),
+                    std::numeric_limits<int64_t>::max()};
+  }
+
+  return parse_stream_id_or_milliseconds(
+          value, std::numeric_limits<int64_t>::max());
+}
+
+std::expected<StreamId, std::string>
+parse_read_start_id(std::string_view const value)
+{
+  return parse_stream_id_or_milliseconds(value, 0);
 }
 
 } // namespace
@@ -101,51 +143,43 @@ RedisStream::range(std::string_view start, std::string_view end) const
   if (entries_.empty()) {
     return std::vector<StreamEntry>{};
   }
-  StreamId start_id;
-  StreamId end_id;
-  if (start == "-") {
-    start_id = StreamId{0, 0};
-  } else {
-    auto const start_id_res = StreamId::parse(start).or_else(
-            [start](std::string const &)
-            {
-              return parse_id_part(start).transform(
-                      [](int64_t const ms) { return StreamId{ms, 0}; });
-            });
-    if (!start_id_res.has_value()) {
-      return std::unexpected(start_id_res.error());
-    }
-    start_id = start_id_res.value();
+
+  auto const start_id_res = parse_range_start_id(start);
+  if (!start_id_res.has_value()) {
+    return std::unexpected(start_id_res.error());
   }
 
-  if (end == "+") {
-    end_id = StreamId{std::numeric_limits<int64_t>::max(),
-                      std::numeric_limits<int64_t>::max()};
-  } else {
-    auto const end_id_res = StreamId::parse(end).or_else(
-            [end](std::string const &)
-            {
-              return parse_id_part(end).transform(
-                      [](int64_t const ms)
-                      {
-                        return StreamId{
-                                ms,
-                                std::int64_t{
-                                        std::numeric_limits<int64_t>::max()}};
-                      });
-            });
-    if (!end_id_res.has_value()) {
-      return std::unexpected(end_id_res.error());
-    }
-    end_id = end_id_res.value();
+  auto const end_id_res = parse_range_end_id(end);
+  if (!end_id_res.has_value()) {
+    return std::unexpected(end_id_res.error());
   }
 
+  auto const start_id = start_id_res.value();
+  auto const end_id = end_id_res.value();
   auto const start_it{entries_.lower_bound(start_id)};
   auto const end_it{entries_.upper_bound(end_id)};
   if (start_it == entries_.cend() || start_it == end_it) {
     return std::vector<StreamEntry>{};
   }
   auto entries{std::ranges::subrange(start_it, end_it) | std::views::values};
+  return std::ranges::to<std::vector<StreamEntry>>(entries);
+}
+std::expected<std::vector<StreamEntry>, std::string>
+RedisStream::read(std::string_view start) const
+{
+  if (entries_.empty()) {
+    return std::vector<StreamEntry>{};
+  }
+  auto const start_id_res = parse_read_start_id(start);
+  if (!start_id_res.has_value()) {
+    return std::unexpected(start_id_res.error());
+  }
+  auto const start_id = start_id_res.value();
+  auto const it{entries_.lower_bound(start_id)};
+  if (it == entries_.cend()) {
+    return std::vector<StreamEntry>{};
+  }
+  auto entries{std::ranges::subrange(it, entries_.cend()) | std::views::values};
   return std::ranges::to<std::vector<StreamEntry>>(entries);
 }
 

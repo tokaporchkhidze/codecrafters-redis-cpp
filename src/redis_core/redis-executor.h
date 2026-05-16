@@ -187,6 +187,16 @@ private:
                                 CommandContext ctx);
   ExecutionOutcome execute_xrange(std::span<std::string const> args,
                                   CommandContext ctx);
+  ExecutionOutcome execute_xread(std::span<std::string const> args,
+                                 CommandContext ctx);
+
+  RedisReply make_stream_entry_reply(
+          redis_storage::StreamEntry const &entry) const;
+  RedisReply make_stream_entries_reply(
+          std::vector<redis_storage::StreamEntry> const &entries) const;
+  RedisReply make_xread_stream_reply(
+          std::string const &key,
+          std::vector<redis_storage::StreamEntry> const &entries) const;
 
   std::string encode_reply(RedisReply const &reply);
 

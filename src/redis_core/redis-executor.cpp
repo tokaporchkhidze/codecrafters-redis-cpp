@@ -61,6 +61,9 @@ RedisExecutor::RedisExecutor(RedisStorePtr p_redis_store) :
   handlers_.try_emplace("TYPE", 1, 1, &RedisExecutor::execute_type);
   handlers_.try_emplace("XADD", 4, std::nullopt, &RedisExecutor::execute_xadd);
   handlers_.try_emplace("XRANGE", 3, 3, &RedisExecutor::execute_xrange);
+  // TODO: Retrieve only from one stream for now.
+  handlers_.try_emplace(
+          "XREAD", 3, std::nullopt, &RedisExecutor::execute_xread);
 }
 
 RedisExecutor::ExecutionResult RedisExecutor::execute(RedisCommand const &cmd,
@@ -350,26 +353,74 @@ RedisExecutor::execute_xrange(std::span<std::string const> const args,
                             SimpleError(entries_res.error())};
   }
 
-  std::vector<RedisReply> entries_reply;
-  entries_reply.reserve(entries_res.value().size());
+  return ExecutionOutcome{ResultType::REPLY,
+                          make_stream_entries_reply(entries_res.value())};
+}
 
-  for (auto const &entry: entries_res.value()) {
-    std::vector<RedisReply> fields_reply;
-    fields_reply.reserve(entry.fields.size() * 2);
-    for (auto const &[field, value]: entry.fields) {
-      fields_reply.emplace_back(BulkString(field));
-      fields_reply.emplace_back(BulkString(value));
+RedisExecutor::ExecutionOutcome
+RedisExecutor::execute_xread(std::span<std::string const> const args,
+                             CommandContext)
+{
+  auto const args_sub{args.subspan(1)};
+  if (args_sub.size() % 2 != 0) {
+    return ExecutionOutcome{ResultType::REPLY,
+                            SimpleError("Invalid number of arguments")};
+  }
+  std::vector<RedisReply> streams_reply;
+  streams_reply.reserve(args_sub.size() / 2);
+  for (int stream_idx{0}, start_idx = args_sub.size() / 2;
+       stream_idx < args_sub.size() / 2;
+       stream_idx += 1, start_idx += 1) {
+    auto read_res{p_store_->xread(args_sub[stream_idx], args_sub[start_idx])};
+    if (!read_res.has_value()) {
+      return ExecutionOutcome{ResultType::REPLY, SimpleError(read_res.error())};
     }
+    streams_reply.emplace_back(
+            make_xread_stream_reply(args_sub[stream_idx], read_res.value()));
+  }
+  return ExecutionOutcome{ResultType::REPLY, Array{std::move(streams_reply)}};
+}
 
-    std::vector<RedisReply> entry_reply;
-    entry_reply.reserve(2);
-    entry_reply.emplace_back(BulkString(entry.id.to_string()));
-    entry_reply.emplace_back(Array{std::move(fields_reply)});
-
-    entries_reply.emplace_back(Array{std::move(entry_reply)});
+RedisExecutor::RedisReply RedisExecutor::make_stream_entry_reply(
+        StreamEntry const &entry) const
+{
+  std::vector<RedisReply> fields_reply;
+  fields_reply.reserve(entry.fields.size() * 2);
+  for (auto const &[field, value]: entry.fields) {
+    fields_reply.emplace_back(BulkString(field));
+    fields_reply.emplace_back(BulkString(value));
   }
 
-  return ExecutionOutcome{ResultType::REPLY, Array{std::move(entries_reply)}};
+  std::vector<RedisReply> entry_reply;
+  entry_reply.reserve(2);
+  entry_reply.emplace_back(BulkString(entry.id.to_string()));
+  entry_reply.emplace_back(Array{std::move(fields_reply)});
+
+  return Array{std::move(entry_reply)};
+}
+
+RedisExecutor::RedisReply RedisExecutor::make_stream_entries_reply(
+        std::vector<StreamEntry> const &entries) const
+{
+  std::vector<RedisReply> entries_reply;
+  entries_reply.reserve(entries.size());
+
+  for (auto const &entry: entries) {
+    entries_reply.emplace_back(make_stream_entry_reply(entry));
+  }
+
+  return Array{std::move(entries_reply)};
+}
+
+RedisExecutor::RedisReply RedisExecutor::make_xread_stream_reply(
+        std::string const &key, std::vector<StreamEntry> const &entries) const
+{
+  std::vector<RedisReply> stream_reply;
+  stream_reply.reserve(2);
+  stream_reply.emplace_back(BulkString(key));
+  stream_reply.emplace_back(make_stream_entries_reply(entries));
+
+  return Array{std::move(stream_reply)};
 }
 
 std::string RedisExecutor::encode_reply(RedisReply const &reply)

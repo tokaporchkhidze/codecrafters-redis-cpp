@@ -4,6 +4,22 @@
 
 using namespace redis_storage;
 
+namespace
+{
+
+std::string store_error_message(RedisStore::StoreError const error)
+{
+  switch (error) {
+  case RedisStore::StoreError::WRONG_TYPE:
+    return "Wrong type";
+  case RedisStore::StoreError::KEY_NOT_FOUND:
+    return "Key not found";
+  }
+  return "Store error";
+}
+
+} // namespace
+
 void RedisStore::set(std::string const &key,
                      std::string const &value,
                      SetOptions const &options)
@@ -43,7 +59,8 @@ RedisStore::rpush(std::string const &key,
 }
 
 std::expected<int64_t, RedisStore::StoreError>
-RedisStore::lpush(std::string const &key, std::span<std::string const> values)
+RedisStore::lpush(std::string const &key,
+                  std::span<std::string const> const values)
 {
   return push_to_list<PushSide::LEFT>(key, values);
 }
@@ -137,7 +154,7 @@ std::expected<std::string, std::string> RedisStore::xadd(
 {
   auto const stream = get_or_create_stream(key);
   if (!stream.has_value()) {
-    return std::unexpected("Wrong type");
+    return std::unexpected(store_error_message(stream.error()));
   }
 
   if (requested_id == "*") {
@@ -151,13 +168,29 @@ RedisStore::xrange(std::string const &key,
                    std::string const &start,
                    std::string const &end)
 {
-  if (auto const it{map_.find(key)}; it == map_.cend()) {
+  auto const stream = find_stream(key);
+  if (!stream.has_value() && stream.error() == StoreError::KEY_NOT_FOUND) {
     return std::vector<StreamEntry>{};
-  } else if (!std::holds_alternative<RedisStream>(it->second.value)) {
-    return std::unexpected("Wrong type");
-  } else {
-    return std::get<RedisStream>(it->second.value).range(start, end);
   }
+  if (!stream.has_value()) {
+    return std::unexpected(store_error_message(stream.error()));
+  }
+
+  return stream->get().range(start, end);
+}
+
+std::expected<std::vector<StreamEntry>, std::string>
+RedisStore::xread(std::string const &key, std::string const &start)
+{
+  auto const stream = find_stream(key);
+  if (!stream.has_value() && stream.error() == StoreError::KEY_NOT_FOUND) {
+    return std::vector<StreamEntry>{};
+  }
+  if (!stream.has_value()) {
+    return std::unexpected(store_error_message(stream.error()));
+  }
+
+  return stream->get().read(start);
 }
 
 
@@ -203,4 +236,17 @@ RedisStore::get_or_create_stream(std::string const &key)
     return std::unexpected(StoreError::WRONG_TYPE);
   }
   return std::ref(std::get<RedisStream>(it->second.value));
+}
+
+std::expected<std::reference_wrapper<RedisStream const>, RedisStore::StoreError>
+RedisStore::find_stream(std::string const &key) const
+{
+  auto const it{map_.find(key)};
+  if (it == map_.cend()) {
+    return std::unexpected(StoreError::KEY_NOT_FOUND);
+  }
+  if (!std::holds_alternative<RedisStream>(it->second.value)) {
+    return std::unexpected(StoreError::WRONG_TYPE);
+  }
+  return std::cref(std::get<RedisStream>(it->second.value));
 }

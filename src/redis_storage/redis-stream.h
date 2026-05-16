@@ -40,6 +40,9 @@ public:
   [[nodiscard]] std::expected<std::vector<StreamEntry>, std::string>
   range(std::string_view start, std::string_view end) const;
 
+  [[nodiscard]] std::expected<std::vector<StreamEntry>, std::string>
+  read(std::string_view start) const;
+
 private:
   std::map<StreamId, StreamEntry> entries_;
 
