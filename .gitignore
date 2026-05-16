@@ -1047,3 +1047,4 @@ dkms.conf
 vcpkg_installed
 
 .codex
+.idea/
