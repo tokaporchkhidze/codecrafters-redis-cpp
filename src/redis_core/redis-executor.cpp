@@ -418,7 +418,7 @@ RedisExecutor::execute_xread(std::span<std::string const> const args,
                             SimpleError(streams_reply_res.error())};
   }
 
-  if (auto streams_reply = std::move(streams_reply_res.value());
+  if (auto &streams_reply = streams_reply_res.value();
       !streams_reply.empty() || !request.blocking) {
     return ExecutionOutcome{ResultType::REPLY, Array{std::move(streams_reply)}};
   }
@@ -478,7 +478,17 @@ RedisExecutor::make_xread_request(XReadOptions const &options)
        stream_idx += 1, start_idx += 1) {
     stream_keys.emplace_back(options.stream_args[stream_idx]);
     std::string start_id{options.stream_args[start_idx]};
-    start_ids.emplace_back(std::move(start_id));
+    if (start_id == "$") {
+      auto last_id = p_store_->xlastid(options.stream_args[stream_idx]);
+      if (!last_id.has_value()) {
+        return std::unexpected(last_id.error());
+      }
+
+      start_ids.emplace_back(last_id->has_value() ? last_id->value().to_string()
+                                                  : "0-0");
+    } else {
+      start_ids.emplace_back(std::move(start_id));
+    }
   }
 
   return XReadRequest{

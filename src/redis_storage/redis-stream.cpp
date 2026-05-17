@@ -183,6 +183,14 @@ RedisStream::read(std::string_view start) const
   return std::ranges::to<std::vector<StreamEntry>>(entries);
 }
 
+std::optional<StreamId> RedisStream::last_id() const
+{
+  if (entries_.empty()) {
+    return std::nullopt;
+  }
+  return entries_.crbegin()->first;
+}
+
 std::expected<StreamId, std::string> RedisStream::add_(
         StreamId const stream_id,
         std::span<std::pair<std::string, std::string> const> const fields)

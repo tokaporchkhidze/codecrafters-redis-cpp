@@ -61,6 +61,9 @@ public:
   std::expected<std::vector<StreamEntry>, std::string>
   xread(std::string const &key, std::string const &start);
 
+  std::expected<std::optional<StreamId>, std::string>
+  xlastid(std::string const &key) const;
+
 private:
   using List = std::deque<std::string>;
   using ValueType = std::variant<std::string, List, RedisStream>;

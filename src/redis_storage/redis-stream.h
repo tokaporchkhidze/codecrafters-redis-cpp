@@ -3,6 +3,7 @@
 
 #include <expected>
 #include <map>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -42,6 +43,8 @@ public:
 
   [[nodiscard]] std::expected<std::vector<StreamEntry>, std::string>
   read(std::string_view start) const;
+
+  [[nodiscard]] std::optional<StreamId> last_id() const;
 
 private:
   std::map<StreamId, StreamEntry> entries_;

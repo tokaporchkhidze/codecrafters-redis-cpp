@@ -193,6 +193,19 @@ RedisStore::xread(std::string const &key, std::string const &start)
   return stream->get().read(start);
 }
 
+std::expected<std::optional<StreamId>, std::string>
+RedisStore::xlastid(std::string const &key) const
+{
+  auto const stream = find_stream(key);
+  if (!stream.has_value() && stream.error() == StoreError::KEY_NOT_FOUND) {
+    return std::nullopt;
+  }
+  if (!stream.has_value()) {
+    return std::unexpected(store_error_message(stream.error()));
+  }
+  return stream->get().last_id();
+}
+
 
 std::expected<std::reference_wrapper<RedisStore::List>, RedisStore::StoreError>
 RedisStore::get_or_create_list(std::string const &key)
