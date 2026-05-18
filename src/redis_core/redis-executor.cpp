@@ -124,39 +124,40 @@ void RedisExecutor::remove_blocked_client(int const fd)
 }
 
 void RedisExecutor::expire_blocked_clients(
-        std::chrono::steady_clock::time_point now)
+        std::chrono::steady_clock::time_point const now)
 {
-  std::erase_if(blocked_clients_by_fd_,
-                [this, now](auto const &entry)
-                {
-                  auto const &p_blocked_client = entry.second;
-                  auto should_be_erased =
-                          p_blocked_client->timeout_tp.has_value() &&
-                          p_blocked_client->timeout_tp.value() < now;
-                  if (should_be_erased) {
-                    p_blocked_client->callback(encode_reply(NullArray{}));
-                  }
-                  return should_be_erased;
-                });
+  while (!blocked_clients_timeout_.empty()) {
+    auto const &timeout{blocked_clients_timeout_.top()};
+    auto const p_blocked_client = timeout.p_blocked_client.lock();
+    if (!p_blocked_client ||
+        p_blocked_client->timeout_tp.value() < timeout.deadline) {
+      blocked_clients_timeout_.pop();
+      continue;
+    }
+
+    if (timeout.deadline >= now) {
+      break;
+    }
+
+    blocked_clients_timeout_.pop();
+    p_blocked_client->callback(encode_reply(NullArray{}));
+    blocked_clients_by_fd_.erase(p_blocked_client->client_fd);
+  }
 }
 
 std::optional<std::chrono::steady_clock::time_point>
 RedisExecutor::get_next_blocked_client_timeout()
 {
-  // TODO: Currently, I am going over every blocked client and
-  // looking for closest timeout deadline,
-  // maybe I could add min-heap to store timeouts so I can quickly
-  // retrieve min value.
-  std::optional<std::chrono::steady_clock::time_point> next_timeout;
-  for (const auto &blocked_client:
-       blocked_clients_by_fd_ | std::views::values) {
-    if (auto const timeout_tp{blocked_client->timeout_tp};
-        timeout_tp.has_value() && (!next_timeout.has_value() ||
-                                   timeout_tp.value() < next_timeout.value())) {
-      next_timeout = timeout_tp;
+  while (!blocked_clients_timeout_.empty()) {
+    auto const &blocked_client_timeout{blocked_clients_timeout_.top()};
+    auto const p_blocked_client{blocked_client_timeout.p_blocked_client.lock()};
+    if (!p_blocked_client) {
+      blocked_clients_timeout_.pop();
+      continue;
     }
+    return p_blocked_client->timeout_tp;
   }
-  return next_timeout;
+  return std::nullopt;
 }
 
 RedisExecutor::ExecutionOutcome
@@ -346,8 +347,12 @@ RedisExecutor::execute_blpop(std::span<std::string const> args,
           })};
   blocked_clients_by_fd_.emplace(ctx.client_fd, blocked_client);
   for (auto const &key: args.subspan(0, args.size() - 1)) {
-    auto [it, inserted]{blocked_clients_by_key_.try_emplace(key)};
+    auto [it, _]{blocked_clients_by_key_.try_emplace(key)};
     it->second.emplace_back(blocked_client);
+  }
+  if (blocked_client->timeout_tp.has_value()) {
+    blocked_clients_timeout_.emplace(blocked_client->timeout_tp.value(),
+                                     blocked_client);
   }
   return ExecutionOutcome{ResultType::BLOCKED, NullBulkString{}};
 }
@@ -552,6 +557,10 @@ void RedisExecutor::block_xread_client(CommandContext ctx, XReadRequest request)
   for (auto const &key: stream_keys) {
     auto [it, inserted]{blocked_clients_by_key_.try_emplace(key)};
     it->second.emplace_back(blocked_client);
+  }
+  if (blocked_client->timeout_tp.has_value()) {
+    blocked_clients_timeout_.emplace(blocked_client->timeout_tp.value(),
+                                     blocked_client);
   }
 }
 

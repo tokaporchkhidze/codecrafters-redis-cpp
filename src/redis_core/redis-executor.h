@@ -248,6 +248,21 @@ private:
 
   void unblock_client_for_key(std::string const &key);
 
+  struct BlockedClientTimeout
+  {
+    std::chrono::steady_clock::time_point deadline;
+    std::weak_ptr<BlockedClient> p_blocked_client;
+  };
+
+  struct TimeoutGreater
+  {
+    bool operator()(BlockedClientTimeout const &a,
+                    BlockedClientTimeout const &b) const
+    {
+      return a.deadline > b.deadline;
+    }
+  };
+
 
   redis_storage::RedisStorePtr p_store_;
   CommandHandlers handlers_;
@@ -255,6 +270,10 @@ private:
           blocked_clients_by_key_;
   std::unordered_map<int, std::shared_ptr<BlockedClient>>
           blocked_clients_by_fd_;
+  std::priority_queue<BlockedClientTimeout,
+                      std::vector<BlockedClientTimeout>,
+                      TimeoutGreater>
+          blocked_clients_timeout_;
 };
 
 using RedisExecutorPtr = std::shared_ptr<RedisExecutor>;
