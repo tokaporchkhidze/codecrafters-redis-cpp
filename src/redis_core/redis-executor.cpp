@@ -170,13 +170,10 @@ RedisExecutor::ExecutionOutcome
 RedisExecutor::execute_set(std::span<std::string const> const args,
                            CommandContext)
 {
-  // TODO: Need to normalize accepted argument to uppercase,
-  // so if users gives "px", we do not silently skip it.
-  std::string_view constexpr px_arg{"PX"};
   RedisStore::SetOptions options;
   // TODO: Currently only supporting passive expiration.
   // I need to implement active one as well..................
-  if (args.size() == 4 && args[2] == px_arg) {
+  if (args.size() == 4 && command_arg_equals(args[2], "PX")) {
     options.ttl_ms = std::chrono::milliseconds{std::stoi(args[3])};
   }
   p_store_->set(args[0], args[1], options);

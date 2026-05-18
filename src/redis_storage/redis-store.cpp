@@ -37,7 +37,6 @@ void RedisStore::set(std::string const &key,
 
 std::optional<std::string> RedisStore::get(std::string const &key)
 {
-  // TODO: For now just handling key-value pairs.
   if (auto const it{map_.find(key)}; it != map_.cend()) {
     auto &[value, expires_at] = it->second;
     if (expires_at.has_value() &&
@@ -45,7 +44,6 @@ std::optional<std::string> RedisStore::get(std::string const &key)
       map_.erase(it);
       return std::nullopt;
     }
-    // TODO: This is incorrect, assumes value type always string.
     return std::get<std::string>(value);
   }
   return std::nullopt;

@@ -112,8 +112,6 @@ RespDecoder::parse(std::string_view const buffer)
             s_terminator) {
           return std::unexpected("invalid bulk string terminator");
         }
-        // TODO: Currently we have args_ vector of strings, what about
-        // other types
         args_.emplace_back(buffer.substr(0, bulk_string_length_));
         bytes_consumed_ += bulk_string_length_ + s_terminator.size();
         if (args_.size() == array_size_) {
