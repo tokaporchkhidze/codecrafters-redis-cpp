@@ -1,5 +1,5 @@
-#include <array>
 #include <cerrno>
+#include <cstring>
 #include <print>
 #include <string_view>
 #include <sys/epoll.h>
@@ -16,6 +16,15 @@
 
 using namespace redis_net;
 
+namespace
+{
+
+size_t constexpr k_initial_input_buffer_size{1024};
+size_t constexpr k_max_idle_input_buffer_size{65536};
+size_t constexpr k_min_size_to_compact{8192};
+
+} // namespace
+
 TcpConnection::TcpConnection(EventLoop &event_loop,
                              int const fd,
                              CloseCallback on_close,
@@ -25,6 +34,7 @@ TcpConnection::TcpConnection(EventLoop &event_loop,
     p_redis_executor_(std::move(p_redis_executor)),
     on_close_{std::move(on_close)}
 {
+  input_buffer_.resize(k_initial_input_buffer_size);
 }
 
 TcpConnection::~TcpConnection() noexcept { close_connection(); }
@@ -47,44 +57,40 @@ void TcpConnection::start()
 
 void TcpConnection::handle_read()
 {
-  std::array<uint8_t, 4096> buffer{};
   while (true) {
-    auto const bytes_read{recv(fd_, buffer.data(), buffer.size(), 0)};
+    allocate_input_buffer_if();
+    auto const bytes_read{recv(fd_,
+                               input_buffer_.data() + input_write_pos_,
+                               input_buffer_.size() - input_write_pos_,
+                               0)};
     if (bytes_read > 0) {
-      // TODO: Need to implement better buffer handling.
-      input_buffer_.insert(
-              input_buffer_.end(), buffer.begin(), buffer.begin() + bytes_read);
+      input_write_pos_ += bytes_read;
 
-      while (!input_buffer_.empty()) {
-        std::string_view const request{
-                reinterpret_cast<char const *>(input_buffer_.data()),
-                input_buffer_.size()};
-        const auto [status, bytes_consumed, args, error_message]{
-                parser_.try_parse(request)};
+      auto current_buffer{std::string_view{
+              reinterpret_cast<char const *>(input_buffer_.data()) +
+                      input_read_pos_,
+              input_write_pos_ - input_read_pos_}};
+
+      while (!current_buffer.empty()) {
+        auto const [status, bytes_consumed, args, error_message]{
+                parser_.try_parse(current_buffer)};
 
         if (bytes_consumed > 0) {
-          std::println("Bytes consumed: {}", bytes_consumed);
-          input_buffer_.erase(input_buffer_.begin(),
-                              input_buffer_.begin() + bytes_consumed);
+          current_buffer = current_buffer.substr(bytes_consumed);
+          input_read_pos_ += bytes_consumed;
         }
 
         if (status == RespDecoder::Status::Incomplete) {
-          std::println("Incomplete");
           break;
         }
         if (status == RespDecoder::Status::Error) {
-          parser_.reset();
+          close_after_write_ = true;
           queue_response(
                   RespEncoder::encode_simple_error("ERR " + error_message));
-          input_buffer_.clear();
-          break;
+          return;
         }
         if (status == RespDecoder::Status::Complete) {
           parser_.reset();
-          std::println("Complete");
-          for (auto const &arg: args) {
-            std::println("Received: {}", arg);
-          }
           RedisCommand cmd(args);
           auto self_weak{weak_from_this()};
           const auto [type, reply]{p_redis_executor_->execute(
@@ -103,10 +109,16 @@ void TcpConnection::handle_read()
             // if client pipelined multiple commands,
             // let's stop after first blocking command,
             // only continue after unblocking happened.
+            // TODO: If we receive multiple pipelined commands
+            //  and blocking happens, after unblocking we rely on
+            // EPOLLIN for resuming the read flow, which may not happen.
+            // need some kind of resume path which will drain the buffer
+            // if it already contains full commands.
             return;
           }
         }
       }
+      compact_input_buffer_if();
       continue;
     }
     if (bytes_read == 0) {
@@ -124,16 +136,29 @@ void TcpConnection::handle_read()
 void TcpConnection::handle_write()
 {
   while (!output_buffer_.empty()) {
+    auto const &response{output_buffer_.front()};
     auto const bytes_written{
-            send(fd_, output_buffer_.data(), output_buffer_.size(), 0)};
+            send(fd_,
+                 response.data() + output_front_offset_,
+                 response.size() - output_front_offset_,
+                 0)};
     if (bytes_written > 0) {
-      output_buffer_.erase(0, static_cast<std::size_t>(bytes_written));
+      output_front_offset_ += static_cast<size_t>(bytes_written);
+      if (output_front_offset_ == response.size()) {
+        output_buffer_.pop();
+        output_front_offset_ = 0;
+      }
       continue;
     }
     if (bytes_written == -1 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
       return;
     }
     handle_error({errno, std::system_category()});
+    return;
+  }
+
+  if (output_buffer_.empty() && close_after_write_) {
+    handle_close();
     return;
   }
 
@@ -156,10 +181,52 @@ void TcpConnection::handle_error(std::error_code const error)
   handle_close();
 }
 
-void TcpConnection::queue_response(std::string const &response)
+void TcpConnection::queue_response(std::string response)
 {
-  output_buffer_ += response;
-  event_loop_.modify(fd_, EPOLLIN | EPOLLOUT | EPOLLRDHUP);
+  output_buffer_.emplace(std::move(response));
+  auto events{EPOLLOUT | EPOLLRDHUP};
+  if (!close_after_write_) {
+    events |= EPOLLIN;
+  }
+  event_loop_.modify(fd_, events);
+}
+
+void TcpConnection::allocate_input_buffer_if()
+{
+  if (input_write_pos_ < input_buffer_.size()) {
+    return;
+  }
+  compact_input_buffer_if();
+  if (input_write_pos_ == input_buffer_.size()) {
+    input_buffer_.resize(input_buffer_.size() * 2);
+  }
+}
+
+void TcpConnection::compact_input_buffer_if()
+{
+  if (input_read_pos_ == 0) {
+    return;
+  }
+
+  if (input_read_pos_ == input_write_pos_) {
+    // Full read, reset indexes.
+    input_read_pos_ = 0;
+    input_write_pos_ = 0;
+    if (input_buffer_.size() >= k_max_idle_input_buffer_size) {
+      input_buffer_.resize(k_initial_input_buffer_size);
+      input_buffer_.shrink_to_fit();
+    }
+  }
+
+  if (input_read_pos_ >= k_min_size_to_compact &&
+      input_read_pos_ >= input_buffer_.size() / 2) {
+    auto const in_progress_bytes{input_write_pos_ - input_read_pos_};
+    std::memmove(input_buffer_.data(),
+                 input_buffer_.data() + input_read_pos_,
+                 in_progress_bytes);
+    input_read_pos_ = 0;
+    input_write_pos_ = in_progress_bytes;
+  }
 }
 
 void TcpConnection::close_connection() noexcept

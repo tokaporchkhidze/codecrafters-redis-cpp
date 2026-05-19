@@ -3,6 +3,7 @@
 
 #include <functional>
 #include <memory>
+#include <queue>
 #include <string>
 #include <vector>
 
@@ -36,17 +37,23 @@ private:
   EventLoop &event_loop_;
   int fd_{-1};
   std::vector<uint8_t> input_buffer_{};
+  size_t input_read_pos_{};
+  size_t input_write_pos_{};
   RespDecoder parser_{};
   RedisExecutorPtr p_redis_executor_;
 
-  std::string output_buffer_{};
+  std::queue<std::string> output_buffer_{};
+  size_t output_front_offset_{};
   CloseCallback on_close_;
+  bool close_after_write_{};
 
   void handle_read();
   void handle_write();
   void handle_close();
   void handle_error(std::error_code error);
-  void queue_response(std::string const &response);
+  void queue_response(std::string response);
+  void allocate_input_buffer_if();
+  void compact_input_buffer_if();
   void close_connection() noexcept;
 };
 
