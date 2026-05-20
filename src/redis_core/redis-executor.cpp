@@ -93,6 +93,7 @@ RedisExecutor::RedisExecutor(RedisStorePtr p_redis_store) :
           "XREAD", 3, std::nullopt, &RedisExecutor::execute_xread);
   handlers_.try_emplace("MULTI", 0, 0, &RedisExecutor::execute_multi);
   handlers_.try_emplace("EXEC", 0, 0, &RedisExecutor::execute_exec);
+  handlers_.try_emplace("DISCARD", 0, 0, &RedisExecutor::execute_discard);
 }
 
 RedisExecutor::ExecutionResult RedisExecutor::execute(RedisCommand &cmd,
@@ -108,7 +109,8 @@ RedisExecutor::ExecutionResult RedisExecutor::execute(RedisCommand &cmd,
                       "Invalid number of arguments - {}", args.size())))};
     }
     if (auto const it_queue{clients_transaction_queue_.find(ctx.client_fd)};
-        it_queue != clients_transaction_queue_.cend() && cmd.name() != "EXEC") {
+        it_queue != clients_transaction_queue_.cend() &&
+        (cmd.name() != "EXEC" && cmd.name() != "DISCARD")) {
       it_queue->second.emplace(handler, std::move(args), ctx);
       return ExecutionResult{ResultType::REPLY,
                              encode_reply(SimpleString("QUEUED"))};
@@ -492,6 +494,17 @@ RedisExecutor::execute_exec(std::span<std::string const>, CommandContext ctx)
   }
   clients_transaction_queue_.erase(it);
   return ExecutionOutcome{ResultType::REPLY, std::move(transaction_replies)};
+}
+
+RedisExecutor::ExecutionOutcome
+RedisExecutor::execute_discard(std::span<std::string const>, CommandContext ctx)
+{
+  if (clients_transaction_queue_.contains(ctx.client_fd)) {
+    clients_transaction_queue_.erase(ctx.client_fd);
+    return ExecutionOutcome{ResultType::REPLY, SimpleString("OK")};
+  }
+  return ExecutionOutcome{ResultType::REPLY,
+                          SimpleError("ERR DISCARD without MULTI")};
 }
 
 std::expected<RedisExecutor::XReadOptions, std::string>

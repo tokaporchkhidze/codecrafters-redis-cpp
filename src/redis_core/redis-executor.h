@@ -234,6 +234,8 @@ private:
                                  CommandContext ctx);
   ExecutionOutcome execute_exec(std::span<std::string const> args,
                                 CommandContext ctx);
+  ExecutionOutcome execute_discard(std::span<std::string const> args,
+                                   CommandContext ctx);
 
   std::expected<XReadOptions, std::string>
   parse_xread_options(std::span<std::string const> args) const;
@@ -296,7 +298,8 @@ private:
     CommandContext ctx;
   };
 
-  std::unordered_map<int, std::queue<TransactionCommand>> clients_transaction_queue_;
+  std::unordered_map<int, std::queue<TransactionCommand>>
+          clients_transaction_queue_;
 };
 
 using RedisExecutorPtr = std::shared_ptr<RedisExecutor>;
