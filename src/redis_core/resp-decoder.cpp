@@ -7,6 +7,10 @@ using namespace redis_core;
 namespace
 {
 
+size_t constexpr k_max_array_elements{1024};
+size_t constexpr k_max_bulk_string_length{4 * 1024 * 1024};
+size_t constexpr k_max_command_payload_size{8 * 1024 * 1024};
+
 std::expected<int32_t, std::string> to_int(std::string_view const buffer)
 {
   int32_t result{};
@@ -29,6 +33,7 @@ void RespDecoder::reset() noexcept
   bytes_consumed_ = 0;
   array_size_ = 0;
   bulk_string_length_ = 0;
+  command_payload_size_ = 0;
   args_.clear();
 }
 
@@ -82,8 +87,12 @@ RespDecoder::parse(std::string_view const buffer)
       if (lengthRes.value() == -1) {
         return Status::Incomplete;
       }
-      args_.reserve(lengthRes.value());
-      array_size_ = lengthRes.value();
+      auto const array_size{static_cast<size_t>(lengthRes.value())};
+      if (array_size > k_max_array_elements) {
+        return std::unexpected("array length exceeds limit");
+      }
+      args_.reserve(array_size);
+      array_size_ = array_size;
       if (array_size_ == 0) {
         return Status::Complete;
       }
@@ -100,7 +109,16 @@ RespDecoder::parse(std::string_view const buffer)
       if (lengthRes.value() == -1) {
         return Status::Incomplete;
       }
-      bulk_string_length_ = lengthRes.value();
+      auto const bulk_string_length{static_cast<size_t>(lengthRes.value())};
+      if (bulk_string_length > k_max_bulk_string_length) {
+        return std::unexpected("bulk string length exceeds limit");
+      }
+      if (command_payload_size_ + bulk_string_length >
+          k_max_command_payload_size) {
+        return std::unexpected("command payload exceeds limit");
+      }
+      command_payload_size_ += bulk_string_length;
+      bulk_string_length_ = bulk_string_length;
       state_ = State::PARSE_BULK_STRING_DATA;
       return Status::Incomplete;
     }

@@ -22,6 +22,7 @@ namespace
 size_t constexpr k_initial_input_buffer_size{1024};
 size_t constexpr k_max_idle_input_buffer_size{65536};
 size_t constexpr k_min_size_to_compact{8192};
+size_t constexpr k_input_buffer_overflow_limit{16 * 1024 * 1024};
 
 } // namespace
 
@@ -58,7 +59,11 @@ void TcpConnection::start()
 void TcpConnection::handle_read()
 {
   while (true) {
-    allocate_input_buffer_if();
+    if (!allocate_input_buffer_if()) {
+      close_after_write_ = true;
+      queue_response(RespEncoder::encode_simple_error("ERR too much data"));
+      return;
+    }
     auto const bytes_read{recv(fd_,
                                input_buffer_.data() + input_write_pos_,
                                input_buffer_.size() - input_write_pos_,
@@ -137,11 +142,10 @@ void TcpConnection::handle_write()
 {
   while (!output_buffer_.empty()) {
     auto const &response{output_buffer_.front()};
-    auto const bytes_written{
-            send(fd_,
-                 response.data() + output_front_offset_,
-                 response.size() - output_front_offset_,
-                 0)};
+    auto const bytes_written{send(fd_,
+                                  response.data() + output_front_offset_,
+                                  response.size() - output_front_offset_,
+                                  0)};
     if (bytes_written > 0) {
       output_front_offset_ += static_cast<size_t>(bytes_written);
       if (output_front_offset_ == response.size()) {
@@ -191,15 +195,21 @@ void TcpConnection::queue_response(std::string response)
   event_loop_.modify(fd_, events);
 }
 
-void TcpConnection::allocate_input_buffer_if()
+bool TcpConnection::allocate_input_buffer_if()
 {
   if (input_write_pos_ < input_buffer_.size()) {
-    return;
+    return true;
   }
   compact_input_buffer_if();
+
   if (input_write_pos_ == input_buffer_.size()) {
-    input_buffer_.resize(input_buffer_.size() * 2);
+    auto const new_size{input_buffer_.size() * 2};
+    if (new_size > k_input_buffer_overflow_limit) {
+      return false;
+    }
+    input_buffer_.resize(new_size);
   }
+  return true;
 }
 
 void TcpConnection::compact_input_buffer_if()

@@ -47,6 +47,7 @@ private:
   size_t bytes_consumed_{};
   size_t array_size_{};
   size_t bulk_string_length_{};
+  size_t command_payload_size_{};
   std::vector<std::string> args_{};
 
 

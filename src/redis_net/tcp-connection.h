@@ -52,7 +52,7 @@ private:
   void handle_close();
   void handle_error(std::error_code error);
   void queue_response(std::string response);
-  void allocate_input_buffer_if();
+  bool allocate_input_buffer_if();
   void compact_input_buffer_if();
   void close_connection() noexcept;
 };
