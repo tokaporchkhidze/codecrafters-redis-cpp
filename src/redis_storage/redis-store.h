@@ -64,6 +64,8 @@ public:
   std::expected<std::optional<StreamId>, std::string>
   xlastid(std::string const &key) const;
 
+  std::expected<int64_t, std::string> incr(std::string const &key);
+
 private:
   using List = std::deque<std::string>;
   using ValueType = std::variant<std::string, List, RedisStream>;

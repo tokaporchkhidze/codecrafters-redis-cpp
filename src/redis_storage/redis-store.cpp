@@ -1,6 +1,8 @@
 #include "redis-store.h"
 
 #include <ranges>
+#include <charconv>
+#include <limits>
 
 using namespace redis_storage;
 
@@ -10,10 +12,10 @@ namespace
 std::string store_error_message(RedisStore::StoreError const error)
 {
   switch (error) {
-  case RedisStore::StoreError::WRONG_TYPE:
-    return "Wrong type";
-  case RedisStore::StoreError::KEY_NOT_FOUND:
-    return "Key not found";
+    case RedisStore::StoreError::WRONG_TYPE:
+      return "Wrong type";
+    case RedisStore::StoreError::KEY_NOT_FOUND:
+      return "Key not found";
   }
   return "Store error";
 }
@@ -202,6 +204,41 @@ RedisStore::xlastid(std::string const &key) const
     return std::unexpected(store_error_message(stream.error()));
   }
   return stream->get().last_id();
+}
+
+std::expected<int64_t, std::string> RedisStore::incr(std::string const &key)
+{
+  auto [it, inserted]{map_.try_emplace(key, "0", std::nullopt)};
+  auto &[value, expires_at]{it->second};
+
+  // if we have not inserted new key, but existing key
+  // had expiration time and is expired, set it to 0 with
+  // no expiration.
+  if (!inserted && expires_at.has_value() &&
+      expires_at.value() < std::chrono::steady_clock::now()) {
+    value = "0";
+    expires_at = std::nullopt;
+  }
+
+  if (!std::holds_alternative<std::string>(value)) {
+    return std::unexpected(
+            "WRONGTYPE Operation against a key holding the wrong kind of value");
+  }
+
+  auto &s{std::get<std::string>(value)};
+  int64_t val{};
+  if (auto [ptr, ec]{std::from_chars(s.data(), s.data() + s.size(), val)};
+      ec != std::errc{} || ptr != s.data() + s.size()) {
+    return std::unexpected("ERR value is not an integer or out of range");
+  }
+
+  if (val == std::numeric_limits<int64_t>::max()) {
+    return std::unexpected("ERR increment would overflow");
+  }
+
+  val++;
+  s = std::to_string(val);
+  return val;
 }
 
 

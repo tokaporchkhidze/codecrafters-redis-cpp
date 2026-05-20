@@ -204,6 +204,8 @@ private:
                                CommandContext ctx);
   ExecutionOutcome execute_get(std::span<std::string const> args,
                                CommandContext ctx);
+  ExecutionOutcome execute_incr(std::span<std::string const> args,
+                                CommandContext ctx);
   ExecutionOutcome execute_echo(std::span<std::string const> args,
                                 CommandContext ctx);
   ExecutionOutcome execute_rpush(std::span<std::string const> args,

@@ -75,6 +75,7 @@ RedisExecutor::RedisExecutor(RedisStorePtr p_redis_store) :
   handlers_.try_emplace("ECHO", 0, 1, &RedisExecutor::execute_echo);
   handlers_.try_emplace("SET", 2, 4, &RedisExecutor::execute_set);
   handlers_.try_emplace("GET", 1, 1, &RedisExecutor::execute_get);
+  handlers_.try_emplace("INCR", 1, 1, &RedisExecutor::execute_incr);
   handlers_.try_emplace(
           "RPUSH", 2, std::nullopt, &RedisExecutor::execute_rpush);
   handlers_.try_emplace(
@@ -188,6 +189,17 @@ RedisExecutor::execute_get(std::span<std::string const> const args,
     return ExecutionOutcome{ResultType::REPLY, BulkString(value.value())};
   }
   return ExecutionOutcome{ResultType::REPLY, NullBulkString{}};
+}
+
+RedisExecutor::ExecutionOutcome
+RedisExecutor::execute_incr(std::span<std::string const> const args,
+                            CommandContext)
+{
+  auto const res{p_store_->incr(args[0])};
+  if (res.has_value()) {
+    return ExecutionOutcome{ResultType::REPLY, Integer{res.value()}};
+  }
+  return ExecutionOutcome{ResultType::REPLY, SimpleError{res.error()}};
 }
 
 RedisExecutor::ExecutionOutcome
