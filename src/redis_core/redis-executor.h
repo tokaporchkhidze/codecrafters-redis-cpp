@@ -7,6 +7,8 @@
 #include <queue>
 #include <string>
 
+#include <queue>
+#include <set>
 #include <variant>
 #include "redis-command.h"
 #include "redis-executor.h"
@@ -40,7 +42,7 @@ public:
 
   explicit RedisExecutor(redis_storage::RedisStorePtr p_redis_store);
 
-  ExecutionResult execute(RedisCommand const &cmd, CommandContext ctx);
+  ExecutionResult execute(RedisCommand &cmd, CommandContext ctx);
 
   void remove_blocked_client(int fd);
 
@@ -228,6 +230,10 @@ private:
                                   CommandContext ctx);
   ExecutionOutcome execute_xread(std::span<std::string const> args,
                                  CommandContext ctx);
+  ExecutionOutcome execute_multi(std::span<std::string const> args,
+                                 CommandContext ctx);
+  ExecutionOutcome execute_exec(std::span<std::string const> args,
+                                CommandContext ctx);
 
   std::expected<XReadOptions, std::string>
   parse_xread_options(std::span<std::string const> args) const;
@@ -276,6 +282,21 @@ private:
                       std::vector<BlockedClientTimeout>,
                       TimeoutGreater>
           blocked_clients_timeout_;
+
+  struct TransactionCommand
+  {
+    TransactionCommand(Handler const handler,
+                       std::vector<std::string> args,
+                       CommandContext ctx) :
+        handler{handler}, args{std::move(args)}, ctx(std::move(ctx))
+    {
+    }
+    Handler handler;
+    std::vector<std::string> args;
+    CommandContext ctx;
+  };
+
+  std::unordered_map<int, std::queue<TransactionCommand>> clients_transaction_queue_;
 };
 
 using RedisExecutorPtr = std::shared_ptr<RedisExecutor>;

@@ -13,8 +13,9 @@ public:
   explicit RedisCommand(std::vector<std::string> args);
 
   [[nodiscard]]std::string_view name() const;
-  [[nodiscard]]std::vector<std::string> const &args() const;
-  [[nodiscard]]std::vector<std::string> args();
+  [[nodiscard]]std::vector<std::string> const &args() const&;
+  [[nodiscard]]std::vector<std::string> &args()&;
+  [[nodiscard]]std::vector<std::string> args()&&;
 
 private:
   std::vector<std::string> args_;

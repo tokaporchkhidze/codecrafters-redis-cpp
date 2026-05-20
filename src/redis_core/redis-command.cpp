@@ -24,6 +24,8 @@ RedisCommand::RedisCommand(std::vector<std::string> args)
 
 std::string_view RedisCommand::name() const { return command_; }
 
-std::vector<std::string> const &RedisCommand::args() const { return args_; }
+std::vector<std::string> const &RedisCommand::args() const & { return args_; }
 
-std::vector<std::string> RedisCommand::args() { return args_; }
+std::vector<std::string> &RedisCommand::args() & { return args_; }
+
+std::vector<std::string> RedisCommand::args() && { return args_; }

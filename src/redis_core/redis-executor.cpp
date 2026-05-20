@@ -5,6 +5,7 @@
 #include <format>
 #include <functional>
 #include <ranges>
+#include <vector>
 
 #include "resp-encoder.h"
 
@@ -90,12 +91,14 @@ RedisExecutor::RedisExecutor(RedisStorePtr p_redis_store) :
   handlers_.try_emplace("XRANGE", 3, 3, &RedisExecutor::execute_xrange);
   handlers_.try_emplace(
           "XREAD", 3, std::nullopt, &RedisExecutor::execute_xread);
+  handlers_.try_emplace("MULTI", 0, 0, &RedisExecutor::execute_multi);
+  handlers_.try_emplace("EXEC", 0, 0, &RedisExecutor::execute_exec);
 }
 
-RedisExecutor::ExecutionResult RedisExecutor::execute(RedisCommand const &cmd,
+RedisExecutor::ExecutionResult RedisExecutor::execute(RedisCommand &cmd,
                                                       CommandContext ctx)
 {
-  auto const &args{cmd.args()};
+  auto &args{cmd.args()};
   if (auto const it{handlers_.find(cmd.name())}; it != handlers_.cend()) {
     auto &[min_argc, max_argc_op, handler] = it->second;
     if (args.size() < min_argc || args.size() > max_argc_op.value_or(INT_MAX)) {
@@ -103,6 +106,12 @@ RedisExecutor::ExecutionResult RedisExecutor::execute(RedisCommand const &cmd,
               ResultType::REPLY,
               encode_reply(SimpleError(std::format(
                       "Invalid number of arguments - {}", args.size())))};
+    }
+    if (auto const it_queue{clients_transaction_queue_.find(ctx.client_fd)};
+        it_queue != clients_transaction_queue_.cend() && cmd.name() != "EXEC") {
+      it_queue->second.emplace(handler, std::move(args), ctx);
+      return ExecutionResult{ResultType::REPLY,
+                             encode_reply(SimpleString("QUEUED"))};
     }
     auto [type, reply] = std::invoke(handler, this, args, ctx);
     return ExecutionResult{type, encode_reply(reply)};
@@ -311,6 +320,11 @@ RedisExecutor::ExecutionOutcome
 RedisExecutor::execute_blpop(std::span<std::string const> args,
                              CommandContext ctx)
 {
+  // if we are in MULTI mode,
+  // just use lpop instead of blpop.
+  if (clients_transaction_queue_.contains(ctx.client_fd)) {
+    return execute_lpop(args, ctx);
+  }
   auto const conversion_res{to_double(args.back())};
   if (!conversion_res.has_value()) {
     return ExecutionOutcome{ResultType::REPLY,
@@ -412,10 +426,15 @@ RedisExecutor::ExecutionOutcome
 RedisExecutor::execute_xread(std::span<std::string const> const args,
                              CommandContext ctx)
 {
-  auto const options_res{parse_xread_options(args)};
+  auto options_res{parse_xread_options(args)};
   if (!options_res.has_value()) {
     return ExecutionOutcome{ResultType::REPLY,
                             SimpleError(options_res.error())};
+  }
+  // if we are in MULTI mode, all blocking commands
+  // become non-blocking.
+  if (clients_transaction_queue_.contains(ctx.client_fd)) {
+    options_res->blocking = false;
   }
 
   auto request_res{make_xread_request(options_res.value())};
@@ -440,6 +459,39 @@ RedisExecutor::execute_xread(std::span<std::string const> const args,
   block_xread_client(std::move(ctx), std::move(request));
 
   return ExecutionOutcome{ResultType::BLOCKED, NullBulkString{}};
+}
+
+RedisExecutor::ExecutionOutcome
+RedisExecutor::execute_multi(std::span<std::string const>, CommandContext ctx)
+{
+  if (clients_transaction_queue_.contains(ctx.client_fd)) {
+    return ExecutionOutcome{ResultType::REPLY,
+                            SimpleError("ERR MULTI calls can not be nested")};
+  }
+  clients_transaction_queue_.try_emplace(ctx.client_fd);
+  return ExecutionOutcome{ResultType::REPLY, SimpleString("OK")};
+}
+
+RedisExecutor::ExecutionOutcome
+RedisExecutor::execute_exec(std::span<std::string const>, CommandContext ctx)
+{
+  if (!clients_transaction_queue_.contains(ctx.client_fd)) {
+    return ExecutionOutcome{ResultType::REPLY,
+                            SimpleError("ERR EXEC without MULTI")};
+  }
+  auto const it{clients_transaction_queue_.find(ctx.client_fd)};
+  auto &transaction_queue{it->second};
+  Array transaction_replies;
+  transaction_replies.values.reserve(transaction_queue.size());
+  while (!transaction_queue.empty()) {
+    auto &current_cmd{transaction_queue.front()};
+    auto [type, reply] = std::invoke(
+            current_cmd.handler, this, current_cmd.args, current_cmd.ctx);
+    transaction_replies.values.emplace_back(std::move(reply));
+    transaction_queue.pop();
+  }
+  clients_transaction_queue_.erase(it);
+  return ExecutionOutcome{ResultType::REPLY, std::move(transaction_replies)};
 }
 
 std::expected<RedisExecutor::XReadOptions, std::string>
