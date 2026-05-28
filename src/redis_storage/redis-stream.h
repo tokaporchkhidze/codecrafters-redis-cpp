@@ -7,6 +7,7 @@
 #include <span>
 #include <string>
 #include <vector>
+#include "radix-trie.h"
 
 namespace redis_storage
 {
@@ -20,6 +21,12 @@ struct StreamId
 
   static std::expected<StreamId, std::string> parse(std::string_view value);
   [[nodiscard]] std::string to_string() const;
+
+  using EncodedKey = std::array<std::byte, 16>;
+
+  [[nodiscard]] EncodedKey encode() const;
+
+  [[nodiscard]] static StreamId decode(EncodedKey const &key);
 };
 
 struct StreamEntry
@@ -47,7 +54,7 @@ public:
   [[nodiscard]] std::optional<StreamId> last_id() const;
 
 private:
-  std::map<StreamId, StreamEntry> entries_;
+  RadixTrie<StreamEntry> entries_{};
 
   std::expected<StreamId, std::string>
   add_(StreamId stream_id,

@@ -2,6 +2,9 @@ cmake_minimum_required(VERSION 3.13)
 
 project(redis-starter-cpp LANGUAGES CXX)
 
+option(TESTS "Tests" OFF)
+
+
 file(GLOB_RECURSE SOURCE_FILES src/*.cpp)
 
 set(CMAKE_CXX_STANDARD 23) # Enable the C++23 standard
@@ -21,11 +24,16 @@ include(FetchContent)
 FetchContent_Declare(
         asiocmake
         GIT_REPOSITORY "https://github.com/OlivierLDff/asio.cmake"
-        GIT_TAG        "main"
+        GIT_TAG "main"
 )
 FetchContent_MakeAvailable(asiocmake)
 
 add_subdirectory(src)
+
+if (${TESTS})
+    enable_testing()
+    add_subdirectory(tests)
+endif ()
 
 target_link_libraries(redis PRIVATE asio asio::asio)
 target_link_libraries(redis PRIVATE Threads::Threads)

@@ -2,8 +2,11 @@
 
 #include <charconv>
 #include <chrono>
+#include <cstring>
 #include <limits>
+#include <queue>
 #include <ranges>
+#include <bit>
 
 using namespace redis_storage;
 
@@ -59,8 +62,8 @@ parse_range_end_id(std::string_view const value)
                     std::numeric_limits<int64_t>::max()};
   }
 
-  return parse_stream_id_or_milliseconds(
-          value, std::numeric_limits<int64_t>::max());
+  return parse_stream_id_or_milliseconds(value,
+                                         std::numeric_limits<int64_t>::max());
 }
 
 std::expected<StreamId, std::string>
@@ -108,6 +111,31 @@ std::string StreamId::to_string() const
   return std::to_string(milliseconds) + "-" + std::to_string(sequence);
 }
 
+StreamId::EncodedKey StreamId::encode() const
+{
+  EncodedKey key{};
+  auto ms{static_cast<uint64_t>(milliseconds)};
+  auto seq{static_cast<uint64_t>(sequence)};
+  if constexpr (std::endian::native == std::endian::little) {
+    ms = std::byteswap(ms);
+    seq = std::byteswap(seq);
+  }
+  std::memcpy(key.data(), &ms, sizeof(ms));
+  std::memcpy(key.data() + sizeof(ms), &seq, sizeof(seq));
+  return key;
+}
+
+StreamId StreamId::decode(EncodedKey const &key)
+{
+  auto ms{*reinterpret_cast<uint64_t const *>(key.data())};
+  auto seq{*reinterpret_cast<uint64_t const *>(key.data() + sizeof(ms))};
+  if constexpr (std::endian::native == std::endian::little) {
+    ms = std::byteswap(ms);
+    seq = std::byteswap(seq);
+  }
+  return {static_cast<int64_t>(ms), static_cast<int64_t>(seq)};
+}
+
 std::expected<std::string, std::string> RedisStream::add(
         std::string_view const requested_id,
         std::span<std::pair<std::string, std::string> const> const fields)
@@ -138,8 +166,10 @@ RedisStream::add(std::span<std::pair<std::string, std::string> const> fields)
 }
 
 std::expected<std::vector<StreamEntry>, std::string>
-RedisStream::range(std::string_view start, std::string_view end) const
+RedisStream::range(std::string_view const start,
+                   std::string_view const end) const
 {
+  std::vector<StreamEntry> entries;
   if (entries_.empty()) {
     return std::vector<StreamEntry>{};
   }
@@ -156,54 +186,48 @@ RedisStream::range(std::string_view start, std::string_view end) const
 
   auto const start_id = start_id_res.value();
   auto const end_id = end_id_res.value();
-  auto const start_it{entries_.lower_bound(start_id)};
-  auto const end_it{entries_.upper_bound(end_id)};
-  if (start_it == entries_.cend() || start_it == end_it) {
-    return std::vector<StreamEntry>{};
-  }
-  auto entries{std::ranges::subrange(start_it, end_it) | std::views::values};
-  return std::ranges::to<std::vector<StreamEntry>>(entries);
+  entries_.for_each(start_id.encode(),
+                    end_id.encode(),
+                    [&entries](auto const key, auto const &entry)
+                    { entries.push_back(entry); });
+  return entries;
 }
 std::expected<std::vector<StreamEntry>, std::string>
-RedisStream::read(std::string_view start) const
+RedisStream::read(std::string_view const start) const
 {
+  std::vector<StreamEntry> entries;
   if (entries_.empty()) {
-    return std::vector<StreamEntry>{};
+    return entries;
   }
   auto const start_id_res = parse_read_start_id(start);
   if (!start_id_res.has_value()) {
     return std::unexpected(start_id_res.error());
   }
   auto const start_id = start_id_res.value();
-  auto const it{entries_.upper_bound(start_id)};
-  if (it == entries_.cend()) {
-    return std::vector<StreamEntry>{};
-  }
-  auto entries{std::ranges::subrange(it, entries_.cend()) | std::views::values};
-  return std::ranges::to<std::vector<StreamEntry>>(entries);
+  entries_.read_from(start_id.encode(),
+                     [&entries](auto const key, auto const &entry)
+                     { entries.push_back(entry); });
+  return entries;
 }
 
 std::optional<StreamId> RedisStream::last_id() const
 {
-  if (entries_.empty()) {
+  auto const max_res{entries_.max()};
+  if (!max_res.has_value()) {
     return std::nullopt;
   }
-  return entries_.crbegin()->first;
+  return max_res.value().second.get().id;
 }
 
 std::expected<StreamId, std::string> RedisStream::add_(
         StreamId const stream_id,
         std::span<std::pair<std::string, std::string> const> const fields)
 {
-  auto const inserted =
-          entries_.try_emplace(
-                          stream_id,
-                          StreamEntry{
-                                  stream_id,
-                                  std::vector<
-                                          std::pair<std::string, std::string>>{
-                                          fields.begin(), fields.end()}})
-                  .second;
+  auto const inserted{entries_.insert(
+          stream_id.encode(),
+          StreamEntry{stream_id,
+                      std::vector<std::pair<std::string, std::string>>{
+                              fields.begin(), fields.end()}})};
   if (!inserted) {
     return std::unexpected("stream entry with given ID already exists");
   }
@@ -216,10 +240,11 @@ StreamId RedisStream::get_next_id() const
   auto const now_ms{std::chrono::duration_cast<std::chrono::milliseconds>(
                             std::chrono::system_clock::now().time_since_epoch())
                             .count()};
-  if (entries_.empty()) {
+  auto const max_res{entries_.max()};
+  if (!max_res.has_value()) {
     return StreamId{now_ms, 0};
   }
-  const auto &[milliseconds, sequence]{entries_.crbegin()->first};
+  auto const [milliseconds, sequence]{max_res.value().second.get().id};
   if (now_ms > milliseconds) {
     return StreamId{now_ms, 0};
   }
@@ -234,8 +259,8 @@ RedisStream::validate_requested_id(StreamId const stream_id) const
     return std::unexpected(
             "ERR The ID specified in XADD must be greater than 0-0");
   }
-
-  if (!entries_.empty() && stream_id <= entries_.crbegin()->first) {
+  if (auto const max_res{entries_.max()};
+      max_res.has_value() && stream_id <= max_res.value().second.get().id) {
     return std::unexpected(
             "ERR The ID specified in XADD is equal or smaller than "
             "the target stream top item");
@@ -250,15 +275,16 @@ void RedisStream::auto_generate_stream_id(StreamId &stream_id)
       stream_id.sequence == s_auto_generate_mark) {
     stream_id = get_next_id();
   } else if (stream_id.sequence == s_auto_generate_mark) {
-    auto const upper = entries_.upper_bound(StreamId{
-            stream_id.milliseconds, std::numeric_limits<int64_t>::max()});
-
-    if (upper != entries_.begin()) {
-      if (auto const previous = std::prev(upper);
-          previous->first.milliseconds == stream_id.milliseconds) {
-        stream_id.sequence = previous->first.sequence + 1;
-        return;
-      }
+    std::priority_queue<StreamId> max_id;
+    entries_.for_each(StreamId{stream_id.milliseconds, 0}.encode(),
+                      StreamId{stream_id.milliseconds,
+                               std::numeric_limits<int64_t>::max()}
+                              .encode(),
+                      [&max_id](auto const key, auto const &entry)
+                      { max_id.push(entry.id); });
+    if (!max_id.empty()) {
+      stream_id.sequence = max_id.top().sequence + 1;
+      return;
     }
 
     stream_id.sequence = stream_id.milliseconds == 0 ? 1 : 0;
