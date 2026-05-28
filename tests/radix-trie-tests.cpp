@@ -59,7 +59,7 @@ namespace
     std::vector<int> values;
     trie.for_each(bytes(start),
                   bytes(end),
-                  [&values](std::span<std::byte> key, int const value)
+                  [&values](std::span<std::byte const> key, int const value)
                   { values.push_back(value); });
     return values;
   }

@@ -1,12 +1,12 @@
 #include "redis-stream.h"
 
+#include <bit>
 #include <charconv>
 #include <chrono>
 #include <cstring>
 #include <limits>
 #include <queue>
 #include <ranges>
-#include <bit>
 
 using namespace redis_storage;
 
@@ -127,8 +127,10 @@ StreamId::EncodedKey StreamId::encode() const
 
 StreamId StreamId::decode(EncodedKey const &key)
 {
-  auto ms{*reinterpret_cast<uint64_t const *>(key.data())};
-  auto seq{*reinterpret_cast<uint64_t const *>(key.data() + sizeof(ms))};
+  uint64_t ms{};
+  uint64_t seq{};
+  std::memcpy(&ms, key.data(), sizeof(ms));
+  std::memcpy(&seq, key.data() + sizeof(ms), sizeof(seq));
   if constexpr (std::endian::native == std::endian::little) {
     ms = std::byteswap(ms);
     seq = std::byteswap(seq);
@@ -275,15 +277,16 @@ void RedisStream::auto_generate_stream_id(StreamId &stream_id)
       stream_id.sequence == s_auto_generate_mark) {
     stream_id = get_next_id();
   } else if (stream_id.sequence == s_auto_generate_mark) {
-    std::priority_queue<StreamId> max_id;
+    StreamId max_id{s_auto_generate_mark, s_auto_generate_mark};
     entries_.for_each(StreamId{stream_id.milliseconds, 0}.encode(),
                       StreamId{stream_id.milliseconds,
                                std::numeric_limits<int64_t>::max()}
                               .encode(),
                       [&max_id](auto const key, auto const &entry)
-                      { max_id.push(entry.id); });
-    if (!max_id.empty()) {
-      stream_id.sequence = max_id.top().sequence + 1;
+                      { max_id = std::max(max_id, entry.id); });
+    if (max_id.milliseconds != s_auto_generate_mark &&
+        max_id.sequence != s_auto_generate_mark) {
+      stream_id.sequence = max_id.sequence + 1;
       return;
     }
 

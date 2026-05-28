@@ -13,20 +13,27 @@
 namespace redis_storage
 {
 
-template<typename Value>
+template<typename T>
+concept RadixValue =
+        std::copy_constructible<T> && std::assignable_from<T &, T const &>;
+
+template<typename F, typename T>
+concept RadixVisitor = std::invocable<F, std::span<std::byte const>, T const &>;
+
+template<RadixValue Value>
 class RadixTrie
 {
 public:
   bool insert(std::span<std::byte const> key, Value value);
   Value *find(std::span<std::byte const> key);
-  template<typename Visitor>
+  template<RadixVisitor<Value> Visitor>
   void for_each(std::span<std::byte const> start,
                 std::span<std::byte const> end,
                 Visitor visitor) const;
-  template<typename Visitor>
+  template<RadixVisitor<Value> Visitor>
   void read_from(std::span<std::byte const> start, Visitor visitor) const;
-  std::optional<
-          std::pair<std::vector<std::byte>, std::reference_wrapper<Value const>>>
+  std::optional<std::pair<std::vector<std::byte>,
+                          std::reference_wrapper<Value const>>>
   max() const;
 
   [[nodiscard]] size_t size() const { return size_; }
@@ -63,7 +70,7 @@ private:
             Value const *&max_value) const;
 };
 
-template<typename Value>
+template<RadixValue Value>
 bool RadixTrie<Value>::insert(std::span<std::byte const> const key, Value value)
 {
   auto inserted{insert_(root_, key, std::move(value))};
@@ -73,7 +80,7 @@ bool RadixTrie<Value>::insert(std::span<std::byte const> const key, Value value)
   return inserted;
 }
 
-template<typename Value>
+template<RadixValue Value>
 Value *RadixTrie<Value>::find(std::span<std::byte const> key)
 {
   auto current{&root_};
@@ -99,8 +106,8 @@ Value *RadixTrie<Value>::find(std::span<std::byte const> key)
   return current->value.has_value() ? &current->value.value() : nullptr;
 }
 
-template<typename Value>
-template<typename Visitor>
+template<RadixValue Value>
+template<RadixVisitor<Value> Visitor>
 void RadixTrie<Value>::for_each(std::span<std::byte const> start,
                                 std::span<std::byte const> end,
                                 Visitor visitor) const
@@ -112,8 +119,8 @@ void RadixTrie<Value>::for_each(std::span<std::byte const> start,
   range_(root_, current_key, start, end, visitor);
 }
 
-template<typename Value>
-template<typename Visitor>
+template<RadixValue Value>
+template<RadixVisitor<Value> Visitor>
 void RadixTrie<Value>::read_from(std::span<std::byte const> start,
                                  Visitor visitor) const
 {
@@ -124,7 +131,7 @@ void RadixTrie<Value>::read_from(std::span<std::byte const> start,
   read_from_(root_, current_key, start, visitor);
 }
 
-template<typename Value>
+template<RadixValue Value>
 std::optional<
         std::pair<std::vector<std::byte>, std::reference_wrapper<Value const>>>
 RadixTrie<Value>::max() const
@@ -140,7 +147,7 @@ RadixTrie<Value>::max() const
   return std::make_pair(std::move(max_key), std::cref(*max_value));
 }
 
-template<typename Value>
+template<RadixValue Value>
 bool RadixTrie<Value>::insert_(Node &node,
                                std::span<std::byte const> remaining,
                                Value value)
@@ -214,7 +221,7 @@ bool RadixTrie<Value>::insert_(Node &node,
   return true;
 }
 
-template<typename Value>
+template<RadixValue Value>
 std::size_t
 RadixTrie<Value>::common_prefix_length(std::span<std::byte const> const a,
                                        std::span<std::byte const> const b)
@@ -223,7 +230,7 @@ RadixTrie<Value>::common_prefix_length(std::span<std::byte const> const a,
   return std::distance(a.begin(), it_a);
 }
 
-template<typename Value>
+template<RadixValue Value>
 void RadixTrie<Value>::insert_child_sort(std::vector<Node> &children,
                                          Node child)
 {
@@ -234,7 +241,7 @@ void RadixTrie<Value>::insert_child_sort(std::vector<Node> &children,
   children.insert(it, std::move(child));
 }
 
-template<typename Value>
+template<RadixValue Value>
 template<typename Visitor>
 void RadixTrie<Value>::range_(Node const &node,
                               std::vector<std::byte> &current_key,
@@ -247,7 +254,8 @@ void RadixTrie<Value>::range_(Node const &node,
   { return std::ranges::lexicographical_compare(a, b); };
   if (node.value.has_value() && !less(current_key, start) &&
       !less(end, current_key)) {
-    visitor(current_key, *node.value);
+    visitor(std::span<std::byte const>(current_key.data(), current_key.size()),
+            *node.value);
   }
 
   for (auto const &child: node.children) {
@@ -261,7 +269,7 @@ void RadixTrie<Value>::range_(Node const &node,
   }
 }
 
-template<typename Value>
+template<RadixValue Value>
 template<typename Visitor>
 void RadixTrie<Value>::read_from_(Node const &node,
                                   std::vector<std::byte> &current_key,
@@ -270,7 +278,7 @@ void RadixTrie<Value>::read_from_(Node const &node,
 {
   if (node.value.has_value() &&
       std::ranges::lexicographical_compare(start, current_key)) {
-    visitor(current_key, *node.value);
+    visitor(std::span<std::byte const>(current_key), *node.value);
   }
 
   for (auto const &child: node.children) {
@@ -284,7 +292,7 @@ void RadixTrie<Value>::read_from_(Node const &node,
   }
 }
 
-template<typename Value>
+template<RadixValue Value>
 void RadixTrie<Value>::max_(Node const &node,
                             std::vector<std::byte> &current_key,
                             std::vector<std::byte> &max_key,
