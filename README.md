@@ -4,7 +4,8 @@ A small Redis-compatible server built in C++ as part of the CodeCrafters
 "Build Your Own Redis" challenge.
 
 The project implements a TCP server, RESP command parsing, command execution,
-and an in-memory data store for strings, lists, and streams.
+and an in-memory data store for strings, lists, streams, and a byte-oriented
+radix trie used for lexicographic indexing and traversal.
 
 ## Goal
 
@@ -21,6 +22,7 @@ the server handles multiple client connections.
 - RESP request parsing and response encoding
 - Non-blocking TCP server using `epoll`
 - In-memory Redis-style storage
+- Byte-oriented radix trie for lexicographic key/index traversal (Lots of room for optimizations still.)
 - Multiple client connections
 - Passive key expiry with `SET key value PX milliseconds`
 - Blocking operations with timeout support for lists and streams
@@ -90,6 +92,8 @@ authentication, Lua scripting, or the full Redis command set.
 - The in-memory data store lives in `redis_storage/redis-store.*`.
 - Stream ID parsing, range lookup, and stream reads live in
   `redis_storage/redis-stream.*`.
+- A compact byte-oriented radix trie with lexicographic ordering and
+  inclusive-range traversal lives in `redis_storage/radix-trie.*`.
 - The TCP server and `epoll` event loop live in `redis_net`.
 
 ## Project Structure
@@ -112,4 +116,5 @@ src/
   redis_storage/
     redis-store.*          # In-memory Redis data store
     redis-stream.*         # Redis stream implementation
+    radix-trie.*           # Byte-oriented radix trie (lexicographic traversal)
 ```

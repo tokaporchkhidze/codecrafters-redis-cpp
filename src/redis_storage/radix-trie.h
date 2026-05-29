@@ -9,7 +9,8 @@
 #include <utility>
 #include <vector>
 
-
+// TODO: Desperate need for memory optimization.
+//    range_ read_from_ search needs speed optimization.
 namespace redis_storage
 {
 
@@ -46,8 +47,63 @@ private:
     std::optional<Value> value;
     std::vector<Node> children;
   };
+
+  struct CompareResult
+  {
+    int result; // -1 <; 0 ==; 1 >
+    bool candidate_prefix_of_bound;
+    bool bound_prefix_of_candidate;
+  };
+
+  struct ByteLess
+  {
+    constexpr bool operator()(std::byte const a,
+                              std::byte const b) const noexcept
+    {
+      return std::to_integer<unsigned>(a) < std::to_integer<unsigned>(b);
+    }
+  };
+
+  template<class R1, class R2>
+  static bool less_span(R1 const &a, R2 const &b) noexcept
+  {
+    return std::ranges::lexicographical_compare(a, b, ByteLess{});
+  }
+
+  static CompareResult
+  compare_labels(std::span<std::byte const> const bound,
+                    std::span<std::byte const> const current_key,
+                    std::span<std::byte const> const child_label) noexcept
+  {
+    auto const bound_size{bound.size()};
+    auto const base_sz{current_key.size()};
+    auto const candidate_size{base_sz + child_label.size()};
+
+    std::size_t i{};
+    for (; i < candidate_size && i < bound_size; ++i) {
+      auto const candidate_byte{i < base_sz ? current_key[i]
+                                            : child_label[i - base_sz]};
+      auto const bound_byte{bound[i]};
+      if (ByteLess{}(candidate_byte, bound_byte)) {
+        return {-1, false, false};
+      }
+      if (ByteLess{}(bound_byte, candidate_byte)) {
+        return {+1, false, false};
+      }
+    }
+
+    if (i == candidate_size && i == bound_size) {
+      return {0, true, true};
+    }
+    if (i == candidate_size) {
+      return {-1, true, false};
+    }
+    return {+1, false, true};
+  }
+
   Node root_{};
   size_t size_{};
+  size_t longest_key_length_{};
 
   bool insert_(Node &node, std::span<std::byte const> remaining, Value value);
   std::size_t common_prefix_length(std::span<std::byte const> a,
@@ -76,6 +132,7 @@ bool RadixTrie<Value>::insert(std::span<std::byte const> const key, Value value)
   auto inserted{insert_(root_, key, std::move(value))};
   if (inserted) {
     ++size_;
+    longest_key_length_ = std::max(longest_key_length_, key.size());
   }
   return inserted;
 }
@@ -112,10 +169,11 @@ void RadixTrie<Value>::for_each(std::span<std::byte const> start,
                                 std::span<std::byte const> end,
                                 Visitor visitor) const
 {
-  if (std::ranges::lexicographical_compare(end, start)) {
+  if (less_span(end, start)) {
     return;
   }
   std::vector<std::byte> current_key;
+  current_key.reserve(longest_key_length_);
   range_(root_, current_key, start, end, visitor);
 }
 
@@ -128,6 +186,7 @@ void RadixTrie<Value>::read_from(std::span<std::byte const> start,
     return;
   }
   std::vector<std::byte> current_key;
+  current_key.reserve(longest_key_length_);
   read_from_(root_, current_key, start, visitor);
 }
 
@@ -141,7 +200,9 @@ RadixTrie<Value>::max() const
   }
 
   std::vector<std::byte> current_key;
+  current_key.reserve(longest_key_length_);
   std::vector<std::byte> max_key;
+  max_key.reserve(longest_key_length_);
   Value const *max_value{};
   max_(root_, current_key, max_key, max_value);
   return std::make_pair(std::move(max_key), std::cref(*max_value));
@@ -234,10 +295,14 @@ template<RadixValue Value>
 void RadixTrie<Value>::insert_child_sort(std::vector<Node> &children,
                                          Node child)
 {
-  auto it = std::ranges::lower_bound(children,
-                                     child,
-                                     [](auto const &a, auto const &b)
-                                     { return a.label < b.label; });
+  auto it = std::ranges::lower_bound(
+          children,
+          child,
+          [](auto const &a, auto const &b)
+          {
+            return less_span(std::span<std::byte const>(a.label),
+                             std::span<std::byte const>(b.label));
+          });
   children.insert(it, std::move(child));
 }
 
@@ -249,16 +314,37 @@ void RadixTrie<Value>::range_(Node const &node,
                               std::span<std::byte const> end,
                               Visitor &visitor) const
 {
-  static auto less = [](std::span<std::byte const> const a,
-                        std::span<std::byte const> const b)
-  { return std::ranges::lexicographical_compare(a, b); };
-  if (node.value.has_value() && !less(current_key, start) &&
-      !less(end, current_key)) {
+  if (node.value.has_value() && !less_span(std::span(current_key), start) &&
+      !less_span(end, std::span(current_key))) {
     visitor(std::span<std::byte const>(current_key.data(), current_key.size()),
             *node.value);
   }
 
   for (auto const &child: node.children) {
+
+    // Here we can decide which subtrees to traverse and which to
+    // completely ignore.
+    // the candidate label is less and not a prefix of lower bound.
+    if (CompareResult const compare_res{
+                compare_labels(start,
+                                  std::span(current_key),
+                                  std::span<std::byte const>(child.label))};
+        compare_res.result < 0 && !compare_res.candidate_prefix_of_bound) {
+      continue;
+    }
+
+    bool break_after_next_child{};
+    if (CompareResult const compare_res{
+                compare_labels(end,
+                                  std::span(current_key),
+                                  std::span<std::byte const>(child.label))};
+        compare_res.result == 0) {
+      break_after_next_child = true;
+    } else if (compare_res.result > 0 ||
+               compare_res.bound_prefix_of_candidate) {
+      break;
+    }
+
     auto const current_key_size{current_key.size()};
     current_key.insert(
             current_key.end(), child.label.begin(), child.label.end());
@@ -266,6 +352,9 @@ void RadixTrie<Value>::range_(Node const &node,
     range_(child, current_key, start, end, visitor);
 
     current_key.resize(current_key_size);
+    if (break_after_next_child) {
+      break;
+    }
   }
 }
 
@@ -276,12 +365,19 @@ void RadixTrie<Value>::read_from_(Node const &node,
                                   std::span<std::byte const> start,
                                   Visitor &visitor) const
 {
-  if (node.value.has_value() &&
-      std::ranges::lexicographical_compare(start, current_key)) {
+  if (node.value.has_value() && less_span(start, std::span(current_key))) {
     visitor(std::span<std::byte const>(current_key), *node.value);
   }
 
   for (auto const &child: node.children) {
+    if (CompareResult const compare_res{
+                compare_labels(start,
+                                  std::span(current_key),
+                                  std::span<std::byte const>(child.label))};
+        compare_res.result < 0 && !compare_res.candidate_prefix_of_bound) {
+      continue;
+    }
+
     auto const current_key_size{current_key.size()};
     current_key.insert(
             current_key.end(), child.label.begin(), child.label.end());
