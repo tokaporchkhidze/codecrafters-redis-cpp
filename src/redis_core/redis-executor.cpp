@@ -94,6 +94,7 @@ RedisExecutor::RedisExecutor(RedisStorePtr p_redis_store) :
   handlers_.try_emplace("MULTI", 0, 0, &RedisExecutor::execute_multi);
   handlers_.try_emplace("EXEC", 0, 0, &RedisExecutor::execute_exec);
   handlers_.try_emplace("DISCARD", 0, 0, &RedisExecutor::execute_discard);
+  handlers_.try_emplace("WATCH", 1, std::nullopt, &RedisExecutor::execute_watch);
 }
 
 RedisExecutor::ExecutionResult RedisExecutor::execute(RedisCommand &cmd,
@@ -505,6 +506,13 @@ RedisExecutor::execute_discard(std::span<std::string const>, CommandContext ctx)
   }
   return ExecutionOutcome{ResultType::REPLY,
                           SimpleError("ERR DISCARD without MULTI")};
+}
+
+RedisExecutor::ExecutionOutcome
+RedisExecutor::execute_watch(std::span<std::string const> args,
+                             CommandContext ctx)
+{
+  return ExecutionOutcome{ResultType::REPLY, SimpleString("OK")};
 }
 
 std::expected<RedisExecutor::XReadOptions, std::string>
