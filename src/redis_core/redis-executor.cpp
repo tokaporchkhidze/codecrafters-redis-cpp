@@ -94,7 +94,8 @@ RedisExecutor::RedisExecutor(RedisStorePtr p_redis_store) :
   handlers_.try_emplace("MULTI", 0, 0, &RedisExecutor::execute_multi);
   handlers_.try_emplace("EXEC", 0, 0, &RedisExecutor::execute_exec);
   handlers_.try_emplace("DISCARD", 0, 0, &RedisExecutor::execute_discard);
-  handlers_.try_emplace("WATCH", 1, std::nullopt, &RedisExecutor::execute_watch);
+  handlers_.try_emplace(
+          "WATCH", 1, std::nullopt, &RedisExecutor::execute_watch);
 }
 
 RedisExecutor::ExecutionResult RedisExecutor::execute(RedisCommand &cmd,
@@ -111,7 +112,8 @@ RedisExecutor::ExecutionResult RedisExecutor::execute(RedisCommand &cmd,
     }
     if (auto const it_queue{clients_transaction_queue_.find(ctx.client_fd)};
         it_queue != clients_transaction_queue_.cend() &&
-        (cmd.name() != "EXEC" && cmd.name() != "DISCARD")) {
+        (cmd.name() != "EXEC" && cmd.name() != "DISCARD" &&
+         cmd.name() != "WATCH")) {
       it_queue->second.emplace(handler, std::move(args), ctx);
       return ExecutionResult{ResultType::REPLY,
                              encode_reply(SimpleString("QUEUED"))};
@@ -512,6 +514,14 @@ RedisExecutor::ExecutionOutcome
 RedisExecutor::execute_watch(std::span<std::string const> args,
                              CommandContext ctx)
 {
+  if (clients_transaction_queue_.contains(ctx.client_fd)) {
+    return ExecutionOutcome{
+            ResultType::REPLY,
+            SimpleError("ERR WATCH inside MULTI is not allowed")};
+  }
+  for (auto const &key: args) {
+    watched_keys_[ctx.client_fd][key] = false;
+  }
   return ExecutionOutcome{ResultType::REPLY, SimpleString("OK")};
 }
 

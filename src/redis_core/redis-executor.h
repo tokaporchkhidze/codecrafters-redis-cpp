@@ -302,6 +302,9 @@ private:
 
   std::unordered_map<int, std::queue<TransactionCommand>>
           clients_transaction_queue_;
+
+  std::unordered_map<int, std::unordered_map<std::string, bool>>
+          watched_keys_;
 };
 
 using RedisExecutorPtr = std::shared_ptr<RedisExecutor>;
