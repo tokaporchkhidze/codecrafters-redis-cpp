@@ -173,7 +173,7 @@ void TcpConnection::handle_close()
 {
   int const closed_fd{fd_};
   close_connection();
-  p_redis_executor_->remove_blocked_client(closed_fd);
+  p_redis_executor_->on_close_clean_up(closed_fd);
   if (on_close_) {
     on_close_(closed_fd);
   }

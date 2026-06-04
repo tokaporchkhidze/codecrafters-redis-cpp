@@ -7,11 +7,9 @@
 #include <queue>
 #include <string>
 
-#include <queue>
-#include <set>
+#include <unordered_set>
 #include <variant>
 #include "redis-command.h"
-#include "redis-executor.h"
 #include "redis_storage/redis-store.h"
 
 namespace redis_core
@@ -44,7 +42,7 @@ public:
 
   ExecutionResult execute(RedisCommand &cmd, CommandContext ctx);
 
-  void remove_blocked_client(int fd);
+  void on_close_clean_up(int fd);
 
   void expire_blocked_clients(std::chrono::steady_clock::time_point now);
 
@@ -200,6 +198,62 @@ private:
   using CommandHandlers = std::
           unordered_map<std::string, CommandSpec, StringHash, std::equal_to<>>;
 
+  struct BlockedClientTimeout
+  {
+    std::chrono::steady_clock::time_point deadline;
+    std::weak_ptr<BlockedClient> p_blocked_client;
+  };
+
+  struct TimeoutGreater
+  {
+    bool operator()(BlockedClientTimeout const &a,
+                    BlockedClientTimeout const &b) const
+    {
+      return a.deadline > b.deadline;
+    }
+  };
+
+  struct TransactionCommand
+  {
+    TransactionCommand(Handler const handler,
+                       std::vector<std::string> args,
+                       CommandContext ctx) :
+        handler{handler}, args{std::move(args)}, ctx(std::move(ctx))
+    {
+    }
+    Handler handler;
+    std::vector<std::string> args;
+    CommandContext ctx;
+  };
+
+  enum class WatchKeyState
+  {
+    NOT_MODIFIED,
+    MODIFIED
+  };
+
+  redis_storage::RedisStorePtr p_store_;
+  CommandHandlers handlers_;
+  std::unordered_map<std::string, std::deque<std::weak_ptr<BlockedClient>>>
+          blocked_clients_by_key_;
+  std::unordered_map<int, std::shared_ptr<BlockedClient>>
+          blocked_clients_by_fd_;
+  std::priority_queue<BlockedClientTimeout,
+                      std::vector<BlockedClientTimeout>,
+                      TimeoutGreater>
+          blocked_clients_timeout_;
+
+  std::unordered_map<int, std::queue<TransactionCommand>>
+          clients_transaction_queue_;
+
+  std::unordered_map<std::string, std::unordered_set<int>>
+          watched_clients_by_key_;
+
+  std::unordered_map<int, std::unordered_set<std::string>>
+          watched_keys_by_clients_;
+
+  std::unordered_set<int> dirty_clients_;
+
   ExecutionOutcome execute_ping(std::span<std::string const> args,
                                 CommandContext ctx);
   ExecutionOutcome execute_set(std::span<std::string const> args,
@@ -260,51 +314,9 @@ private:
 
   void unblock_client_for_key(std::string const &key);
 
-  struct BlockedClientTimeout
-  {
-    std::chrono::steady_clock::time_point deadline;
-    std::weak_ptr<BlockedClient> p_blocked_client;
-  };
+  void clear_watched_keys(int client_fd);
 
-  struct TimeoutGreater
-  {
-    bool operator()(BlockedClientTimeout const &a,
-                    BlockedClientTimeout const &b) const
-    {
-      return a.deadline > b.deadline;
-    }
-  };
-
-
-  redis_storage::RedisStorePtr p_store_;
-  CommandHandlers handlers_;
-  std::unordered_map<std::string, std::deque<std::weak_ptr<BlockedClient>>>
-          blocked_clients_by_key_;
-  std::unordered_map<int, std::shared_ptr<BlockedClient>>
-          blocked_clients_by_fd_;
-  std::priority_queue<BlockedClientTimeout,
-                      std::vector<BlockedClientTimeout>,
-                      TimeoutGreater>
-          blocked_clients_timeout_;
-
-  struct TransactionCommand
-  {
-    TransactionCommand(Handler const handler,
-                       std::vector<std::string> args,
-                       CommandContext ctx) :
-        handler{handler}, args{std::move(args)}, ctx(std::move(ctx))
-    {
-    }
-    Handler handler;
-    std::vector<std::string> args;
-    CommandContext ctx;
-  };
-
-  std::unordered_map<int, std::queue<TransactionCommand>>
-          clients_transaction_queue_;
-
-  std::unordered_map<int, std::unordered_map<std::string, bool>>
-          watched_keys_;
+  void mark_watched_key_dirty(std::string const &key);
 };
 
 using RedisExecutorPtr = std::shared_ptr<RedisExecutor>;

@@ -7,6 +7,7 @@
 #include <memory>
 #include <unordered_map>
 #include <variant>
+#include <functional>
 #include "redis-stream.h"
 
 
@@ -16,6 +17,8 @@ namespace redis_storage
 class RedisStore
 {
 public:
+  using KeyModifiedCallback = std::function<void(std::string const &)>;
+
   enum class StoreError
   {
     WRONG_TYPE = 0,
@@ -26,6 +29,8 @@ public:
   {
     std::optional<std::chrono::milliseconds> ttl_ms;
   };
+
+  void set_key_modified_callback(KeyModifiedCallback callback);
 
   void set(std::string const &key,
            std::string const &value,
@@ -77,6 +82,7 @@ private:
   };
 
   std::unordered_map<std::string, RedisValue> map_{};
+  KeyModifiedCallback key_modified_callback_{};
 
   enum class PushSide
   {
@@ -107,6 +113,10 @@ private:
       }
     }
 
+    if (!values.empty()) {
+      notify_key_modified(key);
+    }
+
     return static_cast<int64_t>(items.size());
   }
 
@@ -115,6 +125,8 @@ private:
 
   std::expected<std::reference_wrapper<RedisStream const>, StoreError>
   find_stream(std::string const &key) const;
+
+  void notify_key_modified(std::string const &key) const;
 };
 
 using RedisStorePtr = std::shared_ptr<RedisStore>;

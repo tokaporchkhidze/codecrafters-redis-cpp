@@ -1,8 +1,9 @@
 #include "redis-store.h"
 
-#include <ranges>
 #include <charconv>
 #include <limits>
+#include <ranges>
+#include <utility>
 
 using namespace redis_storage;
 
@@ -22,6 +23,11 @@ std::string store_error_message(RedisStore::StoreError const error)
 
 } // namespace
 
+void RedisStore::set_key_modified_callback(KeyModifiedCallback callback)
+{
+  key_modified_callback_ = std::move(callback);
+}
+
 void RedisStore::set(std::string const &key,
                      std::string const &value,
                      SetOptions const &options)
@@ -35,6 +41,7 @@ void RedisStore::set(std::string const &key,
                                 value,
                                 expires_at,
                         });
+  notify_key_modified(key);
 }
 
 std::optional<std::string> RedisStore::get(std::string const &key)
@@ -44,6 +51,7 @@ std::optional<std::string> RedisStore::get(std::string const &key)
     if (expires_at.has_value() &&
         expires_at.value() < std::chrono::steady_clock::now()) {
       map_.erase(it);
+      notify_key_modified(key);
       return std::nullopt;
     }
     return std::get<std::string>(value);
@@ -129,6 +137,9 @@ RedisStore::lpop(std::string const &key, int64_t const count)
     list.pop_front();
     elements_to_pop--;
   }
+  if (!removed_elements.empty()) {
+    notify_key_modified(key);
+  }
   return removed_elements;
 }
 
@@ -157,10 +168,16 @@ std::expected<std::string, std::string> RedisStore::xadd(
     return std::unexpected(store_error_message(stream.error()));
   }
 
+  std::expected<std::string, std::string> res;
   if (requested_id == "*") {
-    return stream->get().add(fields);
+    res = stream->get().add(fields);
+  } else {
+    res = stream->get().add(requested_id, fields);
   }
-  return stream->get().add(requested_id, fields);
+  if (res.has_value()) {
+    notify_key_modified(key);
+  }
+  return res;
 }
 
 std::expected<std::vector<StreamEntry>, std::string>
@@ -221,8 +238,8 @@ std::expected<int64_t, std::string> RedisStore::incr(std::string const &key)
   }
 
   if (!std::holds_alternative<std::string>(value)) {
-    return std::unexpected(
-            "WRONGTYPE Operation against a key holding the wrong kind of value");
+    return std::unexpected("WRONGTYPE Operation against a key holding the "
+                           "wrong kind of value");
   }
 
   auto &s{std::get<std::string>(value)};
@@ -238,6 +255,7 @@ std::expected<int64_t, std::string> RedisStore::incr(std::string const &key)
 
   val++;
   s = std::to_string(val);
+  notify_key_modified(key);
   return val;
 }
 
@@ -297,4 +315,11 @@ RedisStore::find_stream(std::string const &key) const
     return std::unexpected(StoreError::WRONG_TYPE);
   }
   return std::cref(std::get<RedisStream>(it->second.value));
+}
+
+void RedisStore::notify_key_modified(std::string const &key) const
+{
+  if (key_modified_callback_) {
+    key_modified_callback_(key);
+  }
 }

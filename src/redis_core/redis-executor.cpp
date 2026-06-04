@@ -96,6 +96,8 @@ RedisExecutor::RedisExecutor(RedisStorePtr p_redis_store) :
   handlers_.try_emplace("DISCARD", 0, 0, &RedisExecutor::execute_discard);
   handlers_.try_emplace(
           "WATCH", 1, std::nullopt, &RedisExecutor::execute_watch);
+  p_store_->set_key_modified_callback([this](std::string const &key)
+                                      { mark_watched_key_dirty(key); });
 }
 
 RedisExecutor::ExecutionResult RedisExecutor::execute(RedisCommand &cmd,
@@ -125,7 +127,7 @@ RedisExecutor::ExecutionResult RedisExecutor::execute(RedisCommand &cmd,
                          encode_reply(SimpleError("Unknown command"))};
 }
 
-void RedisExecutor::remove_blocked_client(int const fd)
+void RedisExecutor::on_close_clean_up(int const fd)
 {
   if (blocked_clients_by_fd_.contains(fd)) {
     // Remove shared_ptr from client fd mapping
@@ -136,6 +138,8 @@ void RedisExecutor::remove_blocked_client(int const fd)
     // different type of clean ups, but that's for later.
     blocked_clients_by_fd_.erase(fd);
   }
+  clients_transaction_queue_.erase(fd);
+  clear_watched_keys(fd);
 }
 
 void RedisExecutor::expire_blocked_clients(
@@ -484,6 +488,15 @@ RedisExecutor::execute_exec(std::span<std::string const>, CommandContext ctx)
     return ExecutionOutcome{ResultType::REPLY,
                             SimpleError("ERR EXEC without MULTI")};
   }
+  auto exec_clear = [this, &ctx]
+  {
+    clients_transaction_queue_.erase(ctx.client_fd);
+    clear_watched_keys(ctx.client_fd);
+  };
+  if (dirty_clients_.contains(ctx.client_fd)) {
+    exec_clear();
+    return ExecutionOutcome{ResultType::REPLY, NullArray{}};
+  }
   auto const it{clients_transaction_queue_.find(ctx.client_fd)};
   auto &transaction_queue{it->second};
   Array transaction_replies;
@@ -495,7 +508,7 @@ RedisExecutor::execute_exec(std::span<std::string const>, CommandContext ctx)
     transaction_replies.values.emplace_back(std::move(reply));
     transaction_queue.pop();
   }
-  clients_transaction_queue_.erase(it);
+  exec_clear();
   return ExecutionOutcome{ResultType::REPLY, std::move(transaction_replies)};
 }
 
@@ -504,6 +517,7 @@ RedisExecutor::execute_discard(std::span<std::string const>, CommandContext ctx)
 {
   if (clients_transaction_queue_.contains(ctx.client_fd)) {
     clients_transaction_queue_.erase(ctx.client_fd);
+    clear_watched_keys(ctx.client_fd);
     return ExecutionOutcome{ResultType::REPLY, SimpleString("OK")};
   }
   return ExecutionOutcome{ResultType::REPLY,
@@ -511,7 +525,7 @@ RedisExecutor::execute_discard(std::span<std::string const>, CommandContext ctx)
 }
 
 RedisExecutor::ExecutionOutcome
-RedisExecutor::execute_watch(std::span<std::string const> args,
+RedisExecutor::execute_watch(std::span<std::string const> const args,
                              CommandContext ctx)
 {
   if (clients_transaction_queue_.contains(ctx.client_fd)) {
@@ -519,8 +533,16 @@ RedisExecutor::execute_watch(std::span<std::string const> args,
             ResultType::REPLY,
             SimpleError("ERR WATCH inside MULTI is not allowed")};
   }
+
+  auto const client_it{
+          watched_keys_by_clients_.try_emplace(ctx.client_fd).first};
+
   for (auto const &key: args) {
-    watched_keys_[ctx.client_fd][key] = false;
+
+    client_it->second.emplace(key);
+    auto const clients_by_key_it{
+            watched_clients_by_key_.try_emplace(key).first};
+    clients_by_key_it->second.emplace(ctx.client_fd);
   }
   return ExecutionOutcome{ResultType::REPLY, SimpleString("OK")};
 }
@@ -768,5 +790,38 @@ void RedisExecutor::unblock_client_for_key(std::string const &key)
     if (blocked_clients.empty()) {
       blocked_clients_by_key_.erase(it);
     }
+  }
+}
+
+void RedisExecutor::clear_watched_keys(int const client_fd)
+{
+  auto const it{watched_keys_by_clients_.find(client_fd)};
+  if (it == watched_keys_by_clients_.end()) {
+    return;
+  }
+  std::ranges::for_each(
+          it->second,
+          [this, client_fd](std::string const &key)
+          {
+            if (auto const clients_it{watched_clients_by_key_.find(key)};
+                clients_it != watched_clients_by_key_.cend()) {
+              clients_it->second.erase(client_fd);
+              if (clients_it->second.empty()) {
+                watched_clients_by_key_.erase(clients_it);
+              }
+            }
+          });
+  dirty_clients_.erase(client_fd);
+  watched_keys_by_clients_.erase(it);
+}
+
+void RedisExecutor::mark_watched_key_dirty(std::string const &key)
+{
+  auto const it{watched_clients_by_key_.find(key)};
+  if (it == watched_clients_by_key_.cend()) {
+    return;
+  }
+  for (auto const client_fd: it->second) {
+    dirty_clients_.emplace(client_fd);
   }
 }
