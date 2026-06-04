@@ -292,6 +292,8 @@ private:
                                    CommandContext ctx);
   ExecutionOutcome execute_watch(std::span<std::string const> args,
                                  CommandContext ctx);
+  ExecutionOutcome execute_unwatch(std::span<std::string const> args,
+                                   CommandContext ctx);
 
   std::expected<XReadOptions, std::string>
   parse_xread_options(std::span<std::string const> args) const;

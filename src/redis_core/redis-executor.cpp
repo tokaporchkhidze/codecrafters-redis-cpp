@@ -96,6 +96,7 @@ RedisExecutor::RedisExecutor(RedisStorePtr p_redis_store) :
   handlers_.try_emplace("DISCARD", 0, 0, &RedisExecutor::execute_discard);
   handlers_.try_emplace(
           "WATCH", 1, std::nullopt, &RedisExecutor::execute_watch);
+  handlers_.try_emplace("UNWATCH", 0, 0, &RedisExecutor::execute_unwatch);
   p_store_->set_key_modified_callback([this](std::string const &key)
                                       { mark_watched_key_dirty(key); });
 }
@@ -544,6 +545,14 @@ RedisExecutor::execute_watch(std::span<std::string const> const args,
             watched_clients_by_key_.try_emplace(key).first};
     clients_by_key_it->second.emplace(ctx.client_fd);
   }
+  return ExecutionOutcome{ResultType::REPLY, SimpleString("OK")};
+}
+
+RedisExecutor::ExecutionOutcome
+RedisExecutor::execute_unwatch(std::span<std::string const> args,
+                               CommandContext ctx)
+{
+  clear_watched_keys(ctx.client_fd);
   return ExecutionOutcome{ResultType::REPLY, SimpleString("OK")};
 }
 
