@@ -26,7 +26,7 @@ the server handles multiple client connections.
 - Multiple client connections
 - Passive key expiry with `SET key value PX milliseconds`
 - Blocking operations with timeout support for lists and streams
-- Basic transaction support with command queuing
+- Basic transaction support with command queuing and watched-key invalidation
 
 ## Supported Commands
 
@@ -73,8 +73,14 @@ the server handles multiple client connections.
   - Starts a per-client transaction and queues subsequent commands.
 - `EXEC`
   - Executes queued commands and returns their replies as an array.
+  - Returns a null array when a watched key was modified before execution.
 - `DISCARD`
-  - Clears the queued transaction commands.
+- `WATCH`
+  - Watches one or more keys for optimistic transaction invalidation.
+- `UNWATCH`
+  - Clears all watched keys for the current client.
+- `DISCARD`
+  - Clears the queued transaction commands and watched keys.
 
 Blocking commands are executed in non-blocking mode while queued inside a
 transaction.
