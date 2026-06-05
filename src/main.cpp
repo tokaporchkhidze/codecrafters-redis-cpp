@@ -8,7 +8,31 @@
 
 using namespace redis_storage;
 
-int main()
+namespace
+{
+
+constexpr auto k_default_port{6379};
+
+std::optional<int> parse_port_argument(std::vector<std::string> const &args)
+{
+  for (int i{1}; i < args.size(); ++i) {
+    if (args[i] == "--port") {
+      if (i + 1 < args.size()) {
+        try {
+          return std::stoi(args[i + 1]);
+        } catch (std::exception const &e) {
+          std::println("Err: '--port' invalid value - {}", e.what());
+          return std::nullopt;
+        }
+      }
+    }
+  }
+  return std::nullopt;
+}
+
+} // namespace
+
+int main(int argc, char *argv[])
 {
   try {
     redis_net::EventLoop event_loop;
@@ -21,8 +45,11 @@ int main()
                     redis_net::EventLoop::EventLoopClock::time_point const tp)
             { p_redis_executor->expire_blocked_clients(tp); });
     redis_net::TcpServer server{event_loop, p_redis_executor};
-
-    if (auto started{server.start(6379, 5)}; !started) {
+    if (auto started{server.start(
+                parse_port_argument(std::vector<std::string>(argv, argv + argc))
+                        .value_or(k_default_port),
+                5)};
+        !started) {
       std::println(stderr, "failed to start server: {}", started.error());
       return 1;
     }

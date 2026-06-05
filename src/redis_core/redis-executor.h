@@ -129,20 +129,32 @@ private:
   using Handler = ExecutionOutcome (RedisExecutor::*)(
           std::span<std::string const> args, CommandContext const& ctx);
 
+  enum class TransactionPolicy
+  {
+    QUEUE,
+    EXECUTE_IMMEDIATELY,
+  };
+
   struct CommandSpec
   {
     // Defined explicitly, so we can in-place construct
     // this struct in the handlers_
     CommandSpec(int const min_argc,
                 std::optional<int> const max_argc,
-                Handler const handler) :
-        min_argc{min_argc}, max_argc{max_argc}, handler{handler}
+                Handler const handler,
+                TransactionPolicy const transaction_policy =
+                        TransactionPolicy::QUEUE) :
+        min_argc{min_argc},
+        max_argc{max_argc},
+        handler{handler},
+        transaction_policy{transaction_policy}
     {
     }
 
     int min_argc{};
     std::optional<int> max_argc{};
     Handler handler{};
+    TransactionPolicy transaction_policy{};
   };
 
   struct BlockedClient;

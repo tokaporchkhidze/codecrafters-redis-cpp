@@ -92,10 +92,22 @@ RedisExecutor::RedisExecutor(RedisStorePtr p_redis_store) :
   handlers_.try_emplace(
           "XREAD", 3, std::nullopt, &RedisExecutor::execute_xread);
   handlers_.try_emplace("MULTI", 0, 0, &RedisExecutor::execute_multi);
-  handlers_.try_emplace("EXEC", 0, 0, &RedisExecutor::execute_exec);
-  handlers_.try_emplace("DISCARD", 0, 0, &RedisExecutor::execute_discard);
+  handlers_.try_emplace("EXEC",
+                        0,
+                        0,
+                        &RedisExecutor::execute_exec,
+                        TransactionPolicy::EXECUTE_IMMEDIATELY);
+  handlers_.try_emplace("DISCARD",
+                        0,
+                        0,
+                        &RedisExecutor::execute_discard,
+                        TransactionPolicy::EXECUTE_IMMEDIATELY);
   handlers_.try_emplace(
-          "WATCH", 1, std::nullopt, &RedisExecutor::execute_watch);
+          "WATCH",
+          1,
+          std::nullopt,
+          &RedisExecutor::execute_watch,
+          TransactionPolicy::EXECUTE_IMMEDIATELY);
   handlers_.try_emplace("UNWATCH", 0, 0, &RedisExecutor::execute_unwatch);
   p_store_->set_key_modified_callback([this](std::string const &key)
                                       { mark_watched_key_dirty(key); });
@@ -106,7 +118,7 @@ RedisExecutor::ExecutionResult RedisExecutor::execute(RedisCommand &cmd,
 {
   auto &args{cmd.args()};
   if (auto const it{handlers_.find(cmd.name())}; it != handlers_.cend()) {
-    auto &[min_argc, max_argc_op, handler] = it->second;
+    auto &[min_argc, max_argc_op, handler, transaction_policy] = it->second;
     if (args.size() < min_argc || args.size() > max_argc_op.value_or(INT_MAX)) {
       return ExecutionResult{
               ResultType::REPLY,
@@ -115,8 +127,7 @@ RedisExecutor::ExecutionResult RedisExecutor::execute(RedisCommand &cmd,
     }
     if (auto const it_queue{clients_transaction_queue_.find(ctx.client_fd)};
         it_queue != clients_transaction_queue_.cend() &&
-        (cmd.name() != "EXEC" && cmd.name() != "DISCARD" &&
-         cmd.name() != "WATCH")) {
+        transaction_policy == TransactionPolicy::QUEUE) {
       it_queue->second.emplace(handler, std::move(args), ctx);
       return ExecutionResult{ResultType::REPLY,
                              encode_reply(SimpleString("QUEUED"))};
