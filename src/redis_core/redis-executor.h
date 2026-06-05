@@ -40,7 +40,7 @@ public:
 
   explicit RedisExecutor(redis_storage::RedisStorePtr p_redis_store);
 
-  ExecutionResult execute(RedisCommand &cmd, CommandContext ctx);
+  ExecutionResult execute(RedisCommand &cmd, CommandContext const& ctx);
 
   void on_close_clean_up(int fd);
 
@@ -127,7 +127,7 @@ private:
   };
 
   using Handler = ExecutionOutcome (RedisExecutor::*)(
-          std::span<std::string const> args, CommandContext ctx);
+          std::span<std::string const> args, CommandContext const& ctx);
 
   struct CommandSpec
   {
@@ -255,45 +255,45 @@ private:
   std::unordered_set<int> dirty_clients_;
 
   ExecutionOutcome execute_ping(std::span<std::string const> args,
-                                CommandContext ctx);
+                                CommandContext const &ctx);
   ExecutionOutcome execute_set(std::span<std::string const> args,
-                               CommandContext ctx);
+                               CommandContext const& ctx);
   ExecutionOutcome execute_get(std::span<std::string const> args,
-                               CommandContext ctx);
+                               CommandContext const& ctx);
   ExecutionOutcome execute_incr(std::span<std::string const> args,
-                                CommandContext ctx);
+                                CommandContext const& ctx);
   ExecutionOutcome execute_echo(std::span<std::string const> args,
-                                CommandContext ctx);
+                                CommandContext const& ctx);
   ExecutionOutcome execute_rpush(std::span<std::string const> args,
-                                 CommandContext ctx);
+                                 CommandContext const& ctx);
   ExecutionOutcome execute_lpush(std::span<std::string const> args,
-                                 CommandContext ctx);
+                                 CommandContext const& ctx);
   ExecutionOutcome execute_llen(std::span<std::string const> args,
-                                CommandContext ctx);
+                                CommandContext const& ctx);
   ExecutionOutcome execute_lrange(std::span<std::string const> args,
-                                  CommandContext ctx);
+                                  CommandContext const& ctx);
   ExecutionOutcome execute_lpop(std::span<std::string const> args,
-                                CommandContext ctx);
+                                CommandContext const& ctx);
   ExecutionOutcome execute_blpop(std::span<std::string const> args,
-                                 CommandContext ctx);
+                                 CommandContext const& ctx);
   ExecutionOutcome execute_type(std::span<std::string const> args,
-                                CommandContext ctx);
+                                CommandContext const& ctx);
   ExecutionOutcome execute_xadd(std::span<std::string const> args,
-                                CommandContext ctx);
+                                CommandContext const& ctx);
   ExecutionOutcome execute_xrange(std::span<std::string const> args,
-                                  CommandContext ctx);
+                                  CommandContext const& ctx);
   ExecutionOutcome execute_xread(std::span<std::string const> args,
-                                 CommandContext ctx);
+                                 CommandContext const& ctx);
   ExecutionOutcome execute_multi(std::span<std::string const> args,
-                                 CommandContext ctx);
+                                 CommandContext const& ctx);
   ExecutionOutcome execute_exec(std::span<std::string const> args,
-                                CommandContext ctx);
+                                CommandContext const& ctx);
   ExecutionOutcome execute_discard(std::span<std::string const> args,
-                                   CommandContext ctx);
+                                   CommandContext const& ctx);
   ExecutionOutcome execute_watch(std::span<std::string const> args,
-                                 CommandContext ctx);
+                                 CommandContext const& ctx);
   ExecutionOutcome execute_unwatch(std::span<std::string const> args,
-                                   CommandContext ctx);
+                                   CommandContext const& ctx);
 
   std::expected<XReadOptions, std::string>
   parse_xread_options(std::span<std::string const> args) const;
@@ -302,7 +302,7 @@ private:
   std::expected<std::vector<RedisReply>, std::string>
   read_xread_streams(std::vector<std::string> const &stream_keys,
                      std::vector<std::string> const &start_ids) const;
-  void block_xread_client(CommandContext ctx, XReadRequest request);
+  void block_xread_client(CommandContext const& ctx, XReadRequest request);
 
   RedisReply
   make_stream_entry_reply(redis_storage::StreamEntry const &entry) const;

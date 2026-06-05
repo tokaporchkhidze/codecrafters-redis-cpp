@@ -102,7 +102,7 @@ RedisExecutor::RedisExecutor(RedisStorePtr p_redis_store) :
 }
 
 RedisExecutor::ExecutionResult RedisExecutor::execute(RedisCommand &cmd,
-                                                      CommandContext ctx)
+                                                      CommandContext const &ctx)
 {
   auto &args{cmd.args()};
   if (auto const it{handlers_.find(cmd.name())}; it != handlers_.cend()) {
@@ -136,7 +136,7 @@ void RedisExecutor::on_close_clean_up(int const fd)
     // those will be lazily pruned at some point during unblock_client_for_key
     // execution, when accessed for the key.
     // TODO: Maybe I need second thread, running periodically and doing
-    // different type of clean ups, but that's for later.
+    // different type of clean-ups, but that's for later.
     blocked_clients_by_fd_.erase(fd);
   }
   clients_transaction_queue_.erase(fd);
@@ -181,14 +181,15 @@ RedisExecutor::get_next_blocked_client_timeout()
 }
 
 RedisExecutor::ExecutionOutcome
-RedisExecutor::execute_ping(std::span<std::string const> const, CommandContext)
+RedisExecutor::execute_ping(std::span<std::string const> const,
+                            CommandContext const &)
 {
   return ExecutionOutcome{ResultType::REPLY, SimpleString("PONG")};
 }
 
 RedisExecutor::ExecutionOutcome
 RedisExecutor::execute_set(std::span<std::string const> const args,
-                           CommandContext)
+                           CommandContext const &)
 {
   RedisStore::SetOptions options;
   // TODO: Currently only supporting passive expiration.
@@ -202,7 +203,7 @@ RedisExecutor::execute_set(std::span<std::string const> const args,
 
 RedisExecutor::ExecutionOutcome
 RedisExecutor::execute_get(std::span<std::string const> const args,
-                           CommandContext)
+                           CommandContext const &)
 {
   if (auto const value{p_store_->get(args[0])}; value.has_value()) {
     return ExecutionOutcome{ResultType::REPLY, BulkString(value.value())};
@@ -212,7 +213,7 @@ RedisExecutor::execute_get(std::span<std::string const> const args,
 
 RedisExecutor::ExecutionOutcome
 RedisExecutor::execute_incr(std::span<std::string const> const args,
-                            CommandContext)
+                            CommandContext const &)
 {
   auto const res{p_store_->incr(args[0])};
   if (res.has_value()) {
@@ -223,7 +224,7 @@ RedisExecutor::execute_incr(std::span<std::string const> const args,
 
 RedisExecutor::ExecutionOutcome
 RedisExecutor::execute_echo(std::span<std::string const> const args,
-                            CommandContext)
+                            CommandContext const &)
 {
   if (args.empty()) {
     return ExecutionOutcome{ResultType::REPLY, BulkString("")};
@@ -233,7 +234,7 @@ RedisExecutor::execute_echo(std::span<std::string const> const args,
 
 RedisExecutor::ExecutionOutcome
 RedisExecutor::execute_rpush(std::span<std::string const> const args,
-                             CommandContext)
+                             CommandContext const &)
 {
   // TODO: I need to implement some proper error handling,
   // not only here but throughout the project.
@@ -248,7 +249,7 @@ RedisExecutor::execute_rpush(std::span<std::string const> const args,
 
 RedisExecutor::ExecutionOutcome
 RedisExecutor::execute_lpush(std::span<std::string const> const args,
-                             CommandContext)
+                             CommandContext const &)
 {
   // TODO: I need to implement some proper error handling,
   // not only here but throughout the project.
@@ -263,7 +264,7 @@ RedisExecutor::execute_lpush(std::span<std::string const> const args,
 
 RedisExecutor::ExecutionOutcome
 RedisExecutor::execute_llen(std::span<std::string const> const args,
-                            CommandContext)
+                            CommandContext const &)
 {
   // TODO: I need to implement some proper error handling,
   // not only here but throughout the project.
@@ -276,7 +277,7 @@ RedisExecutor::execute_llen(std::span<std::string const> const args,
 
 RedisExecutor::ExecutionOutcome
 RedisExecutor::execute_lrange(std::span<std::string const> const args,
-                              CommandContext)
+                              CommandContext const &)
 {
   auto elements{
           p_store_->lrange(args[0], std::stoll(args[1]), std::stoll(args[2]))};
@@ -292,7 +293,7 @@ RedisExecutor::execute_lrange(std::span<std::string const> const args,
 
 RedisExecutor::ExecutionOutcome
 RedisExecutor::execute_lpop(std::span<std::string const> const args,
-                            CommandContext)
+                            CommandContext const &)
 {
   bool const has_count_arg = args.size() == 2;
   int64_t const count = has_count_arg ? std::stoll(args[1]) : 1;
@@ -327,8 +328,8 @@ RedisExecutor::execute_lpop(std::span<std::string const> const args,
 }
 
 RedisExecutor::ExecutionOutcome
-RedisExecutor::execute_blpop(std::span<std::string const> args,
-                             CommandContext ctx)
+RedisExecutor::execute_blpop(std::span<std::string const> const args,
+                             CommandContext const &ctx)
 {
   // if we are in MULTI mode,
   // just use lpop instead of blpop.
@@ -392,7 +393,7 @@ RedisExecutor::execute_blpop(std::span<std::string const> args,
 
 RedisExecutor::ExecutionOutcome
 RedisExecutor::execute_type(std::span<std::string const> const args,
-                            CommandContext)
+                            CommandContext const &)
 {
   return ExecutionOutcome{ResultType::REPLY,
                           SimpleString{p_store_->get_type(args[0])}};
@@ -400,7 +401,7 @@ RedisExecutor::execute_type(std::span<std::string const> const args,
 
 RedisExecutor::ExecutionOutcome
 RedisExecutor::execute_xadd(std::span<std::string const> const args,
-                            CommandContext)
+                            CommandContext const &)
 {
   std::vector<std::pair<std::string, std::string>> fields;
   if (args.size() % 2 != 0) {
@@ -420,7 +421,7 @@ RedisExecutor::execute_xadd(std::span<std::string const> const args,
 
 RedisExecutor::ExecutionOutcome
 RedisExecutor::execute_xrange(std::span<std::string const> const args,
-                              CommandContext)
+                              CommandContext const &)
 {
   auto const entries_res{p_store_->xrange(args[0], args[1], args[2])};
   if (!entries_res.has_value()) {
@@ -434,7 +435,7 @@ RedisExecutor::execute_xrange(std::span<std::string const> const args,
 
 RedisExecutor::ExecutionOutcome
 RedisExecutor::execute_xread(std::span<std::string const> const args,
-                             CommandContext ctx)
+                             CommandContext const &ctx)
 {
   auto options_res{parse_xread_options(args)};
   if (!options_res.has_value()) {
@@ -466,13 +467,14 @@ RedisExecutor::execute_xread(std::span<std::string const> const args,
     return ExecutionOutcome{ResultType::REPLY, Array{std::move(streams_reply)}};
   }
 
-  block_xread_client(std::move(ctx), std::move(request));
+  block_xread_client(ctx, std::move(request));
 
   return ExecutionOutcome{ResultType::BLOCKED, NullBulkString{}};
 }
 
 RedisExecutor::ExecutionOutcome
-RedisExecutor::execute_multi(std::span<std::string const>, CommandContext ctx)
+RedisExecutor::execute_multi(std::span<std::string const>,
+                             CommandContext const &ctx)
 {
   if (clients_transaction_queue_.contains(ctx.client_fd)) {
     return ExecutionOutcome{ResultType::REPLY,
@@ -483,7 +485,8 @@ RedisExecutor::execute_multi(std::span<std::string const>, CommandContext ctx)
 }
 
 RedisExecutor::ExecutionOutcome
-RedisExecutor::execute_exec(std::span<std::string const>, CommandContext ctx)
+RedisExecutor::execute_exec(std::span<std::string const>,
+                            CommandContext const &ctx)
 {
   if (!clients_transaction_queue_.contains(ctx.client_fd)) {
     return ExecutionOutcome{ResultType::REPLY,
@@ -514,7 +517,8 @@ RedisExecutor::execute_exec(std::span<std::string const>, CommandContext ctx)
 }
 
 RedisExecutor::ExecutionOutcome
-RedisExecutor::execute_discard(std::span<std::string const>, CommandContext ctx)
+RedisExecutor::execute_discard(std::span<std::string const>,
+                               CommandContext const &ctx)
 {
   if (clients_transaction_queue_.contains(ctx.client_fd)) {
     clients_transaction_queue_.erase(ctx.client_fd);
@@ -527,7 +531,7 @@ RedisExecutor::execute_discard(std::span<std::string const>, CommandContext ctx)
 
 RedisExecutor::ExecutionOutcome
 RedisExecutor::execute_watch(std::span<std::string const> const args,
-                             CommandContext ctx)
+                             CommandContext const &ctx)
 {
   if (clients_transaction_queue_.contains(ctx.client_fd)) {
     return ExecutionOutcome{
@@ -549,8 +553,8 @@ RedisExecutor::execute_watch(std::span<std::string const> const args,
 }
 
 RedisExecutor::ExecutionOutcome
-RedisExecutor::execute_unwatch(std::span<std::string const> args,
-                               CommandContext ctx)
+RedisExecutor::execute_unwatch(std::span<std::string const>,
+                               CommandContext const &ctx)
 {
   clear_watched_keys(ctx.client_fd);
   return ExecutionOutcome{ResultType::REPLY, SimpleString("OK")};
@@ -651,7 +655,8 @@ RedisExecutor::read_xread_streams(
   return streams_reply;
 }
 
-void RedisExecutor::block_xread_client(CommandContext ctx, XReadRequest request)
+void RedisExecutor::block_xread_client(CommandContext const &ctx,
+                                       XReadRequest request)
 {
   auto stream_keys = std::move(request.stream_keys);
   auto start_ids = std::move(request.start_ids);
