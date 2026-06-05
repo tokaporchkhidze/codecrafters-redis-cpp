@@ -102,13 +102,14 @@ RedisExecutor::RedisExecutor(RedisStorePtr p_redis_store) :
                         0,
                         &RedisExecutor::execute_discard,
                         TransactionPolicy::EXECUTE_IMMEDIATELY);
-  handlers_.try_emplace(
-          "WATCH",
-          1,
-          std::nullopt,
-          &RedisExecutor::execute_watch,
-          TransactionPolicy::EXECUTE_IMMEDIATELY);
+  handlers_.try_emplace("WATCH",
+                        1,
+                        std::nullopt,
+                        &RedisExecutor::execute_watch,
+                        TransactionPolicy::EXECUTE_IMMEDIATELY);
   handlers_.try_emplace("UNWATCH", 0, 0, &RedisExecutor::execute_unwatch);
+  handlers_.try_emplace("INFO", 0, 1, &RedisExecutor::execute_info);
+
   p_store_->set_key_modified_callback([this](std::string const &key)
                                       { mark_watched_key_dirty(key); });
 }
@@ -569,6 +570,21 @@ RedisExecutor::execute_unwatch(std::span<std::string const>,
 {
   clear_watched_keys(ctx.client_fd);
   return ExecutionOutcome{ResultType::REPLY, SimpleString("OK")};
+}
+
+RedisExecutor::ExecutionOutcome
+RedisExecutor::execute_info(std::span<std::string const> args,
+                            CommandContext const &ctx)
+{
+  if (command_arg_equals(args[0], "replication")) {
+    return ExecutionOutcome{
+            ResultType::REPLY,
+            BulkString(std::format("{}\nrole:{}",
+                                   "# Replication",
+                                   is_master_ ? "master" : "slave"))};
+  }
+  return ExecutionOutcome{ResultType::REPLY,
+                          SimpleError("Unsupported info argument")};
 }
 
 std::expected<RedisExecutor::XReadOptions, std::string>
