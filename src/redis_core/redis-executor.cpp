@@ -69,8 +69,8 @@ std::chrono::steady_clock::time_point get_timeout(double const seconds)
 
 } // namespace
 
-RedisExecutor::RedisExecutor(RedisStorePtr p_redis_store) :
-    p_store_(std::move(p_redis_store))
+RedisExecutor::RedisExecutor(RedisStorePtr p_redis_store, bool const is_master) :
+    p_store_(std::move(p_redis_store)), is_master_(is_master)
 {
   handlers_.try_emplace("PING", 0, 0, &RedisExecutor::execute_ping);
   handlers_.try_emplace("ECHO", 0, 1, &RedisExecutor::execute_echo);

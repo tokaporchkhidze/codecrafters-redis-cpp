@@ -38,7 +38,7 @@ public:
     std::string reply;
   };
 
-  explicit RedisExecutor(redis_storage::RedisStorePtr p_redis_store);
+  RedisExecutor(redis_storage::RedisStorePtr p_redis_store, bool is_master);
 
   ExecutionResult execute(RedisCommand &cmd, CommandContext const &ctx);
 
@@ -266,7 +266,7 @@ private:
 
   std::unordered_set<int> dirty_clients_;
 
-  bool is_master_{true};
+  bool is_master_{};
 
   ExecutionOutcome execute_ping(std::span<std::string const> args,
                                 CommandContext const &ctx);
