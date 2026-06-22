@@ -10,12 +10,15 @@ enable_testing()
 
 set(TARGET_NAME redis-tests)
 
-add_executable(${TARGET_NAME} radix-trie-tests.cpp)
+add_executable(${TARGET_NAME}
+        radix-trie-tests.cpp
+        command-registry-tests.cpp)
 
 target_link_libraries(${TARGET_NAME}
         PRIVATE
         GTest::gtest_main
         GTest::gmock
+        redis-core
         redis-storage)
 
 include(GoogleTest)
