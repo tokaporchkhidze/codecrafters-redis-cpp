@@ -1,6 +1,6 @@
 #include "xrange-command.h"
 
-#include "reply-builder.h"
+#include "../reply-builder.h"
 
 namespace redis_core::redis_command
 {

@@ -6,6 +6,7 @@ add_library(redis-core OBJECT
         resp-encoder.cpp
         redis-command.cpp
         redis-executor.cpp
+        reply-builder.cpp
         ${COMMAND_SOURCES}
         ${SERVICE_SOURCES})
 

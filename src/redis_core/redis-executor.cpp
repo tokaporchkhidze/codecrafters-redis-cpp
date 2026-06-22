@@ -4,7 +4,7 @@
 #include <format>
 #include <utility>
 
-#include "commands/reply-builder.h"
+#include "reply-builder.h"
 
 using namespace redis_core;
 using namespace redis_storage;

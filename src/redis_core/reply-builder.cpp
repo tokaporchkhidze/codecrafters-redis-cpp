@@ -2,7 +2,7 @@
 
 #include <variant>
 
-#include "../resp-encoder.h"
+#include "resp-encoder.h"
 
 namespace redis_core::redis_command
 {

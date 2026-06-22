@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-#include "command-interface.h"
+#include "redis-reply.h"
 #include "redis_storage/redis-store.h"
 
 namespace redis_core::redis_command

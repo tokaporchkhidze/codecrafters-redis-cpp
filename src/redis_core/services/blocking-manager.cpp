@@ -4,7 +4,7 @@
 #include <charconv>
 #include <ranges>
 
-#include "../commands/reply-builder.h"
+#include "../reply-builder.h"
 
 namespace redis_core::redis_command
 {
