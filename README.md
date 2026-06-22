@@ -94,7 +94,13 @@ authentication, Lua scripting, or the full Redis command set.
 ## Implementation Highlights
 
 - RESP request parsing and response encoding live in `redis_core`.
-- Command dispatch and command behavior live in `redis_core/redis-executor.*`.
+- Each command is implemented as its own `ICommand` class under
+  `redis_core/commands/`, registered in a `CommandRegistry` that provides
+  name-based lookup.
+- `RedisExecutor` is a coordinator: it validates arguments, performs
+  registry lookup, and delegates execution. Blocking and transaction state are
+  owned by `IBlockingService` and `ITransactionService`.
+- RESP reply types and reply encoding live in `redis_core/commands/reply-builder.*`.
 - The in-memory data store lives in `redis_storage/redis-store.*`.
 - Stream ID parsing, range lookup, and stream reads live in
   `redis_storage/redis-stream.*`.
@@ -112,7 +118,20 @@ src/
     resp-decoder.*         # RESP request parser
     resp-encoder.*         # RESP response encoder
     redis-command.*        # Command representation
-    redis-executor.*       # Command dispatch and execution
+    redis-executor.*       # Command coordinator (validation, lookup, dispatch)
+    command-context.h      # Per-client execution context
+
+    commands/
+      command-interface.h  # ICommand, RedisReply, CommandDeps
+      command-registry.*   # Name -> command registry and built-in registration
+      reply-builder.*      # RESP reply types and encoding helpers
+      *-command.*          # One class per supported command
+
+    services/
+      blocking-manager.*   # Blocking client tracking and timeouts
+      blocking-service.h   # IBlockingService interface
+      transaction-manager.*# Transaction queues and watched-key tracking
+      transaction-service.h# ITransactionService interface
 
   redis_net/
     event-loop.*           # epoll-based event loop
