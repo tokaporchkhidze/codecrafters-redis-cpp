@@ -11,6 +11,7 @@
 #include "services/blocking-manager.h"
 #include "commands/command-interface.h"
 #include "commands/command-registry.h"
+#include "services/replication-manager.h"
 #include "services/transaction-manager.h"
 
 namespace redis_core
@@ -29,7 +30,8 @@ public:
     std::string reply;
   };
 
-  RedisExecutor(redis_storage::RedisStorePtr p_redis_store, bool is_master);
+  RedisExecutor(redis_storage::RedisStorePtr p_redis_store,
+                redis_command::ReplicationManagerPtr p_replication);
 
   ExecutionResult execute(RedisCommand &cmd, CommandContext const &ctx);
 
@@ -45,7 +47,7 @@ public:
 private:
   redis_storage::RedisStorePtr p_store_;
   redis_command::CommandRegistry registry_;
-  bool is_master_{};
+  redis_command::ReplicationManagerPtr p_replication_;
   redis_command::BlockingManager blocking_manager_;
   redis_command::TransactionManager transaction_manager_;
 };

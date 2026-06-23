@@ -4,6 +4,7 @@
 #include <charconv>
 #include <ranges>
 
+#include "../command-arg-utils.h"
 #include "../reply-builder.h"
 
 namespace redis_core::redis_command
@@ -34,19 +35,6 @@ std::expected<int64_t, std::string> to_int64(std::string_view const buffer)
   return std::unexpected("invalid integer value");
 }
 
-constexpr char ascii_upper(char const c)
-{
-  if (c >= 'a' && c <= 'z') {
-    return static_cast<char>(c - 'a' + 'A');
-  }
-  return c;
-}
-
-bool command_arg_equals(std::string_view const lhs, std::string_view const rhs)
-{
-  return lhs.size() == rhs.size() &&
-         std::ranges::equal(lhs, rhs, {}, ascii_upper, ascii_upper);
-}
 
 std::chrono::steady_clock::time_point get_timeout(double const seconds)
 {

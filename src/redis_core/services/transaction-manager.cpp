@@ -7,8 +7,8 @@ namespace redis_core::redis_command
 
 TransactionManager::TransactionManager(redis_storage::RedisStorePtr store,
                                        IBlockingService &blocking,
-                                       bool const is_master) :
-    p_store_(std::move(store)), blocking_(blocking), is_master_(is_master)
+                                       IReplicationService &replication) :
+    p_store_(std::move(store)), blocking_(blocking), replication_(replication)
 {
 }
 
@@ -45,7 +45,7 @@ TransactionManager::run_exec(std::span<std::string const>,
   auto &transaction_queue{it->second};
   Array transaction_replies;
   transaction_replies.values.reserve(transaction_queue.size());
-  CommandDeps deps{p_store_, blocking_, *this, is_master_};
+  CommandDeps deps{p_store_, blocking_, *this, replication_};
   while (!transaction_queue.empty()) {
     auto &current_cmd{transaction_queue.front()};
     auto [type, reply] = current_cmd.command->execute(

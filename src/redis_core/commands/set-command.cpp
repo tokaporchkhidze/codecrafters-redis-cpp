@@ -1,25 +1,12 @@
 #include "set-command.h"
 
-#include <cctype>
 #include <chrono>
-#include <ranges>
 #include <string>
-#include <string_view>
+
+#include "../command-arg-utils.h"
 
 namespace redis_core::redis_command
 {
-
-namespace
-{
-
-bool command_arg_equals(std::string_view const lhs, std::string_view const rhs)
-{
-  return std::ranges::equal(
-          lhs, rhs, [](char const a, char const b)
-          { return std::toupper(a) == std::toupper(b); });
-}
-
-} // namespace
 
 ArgSpec SetCommand::arg_spec() const { return {2, 4}; }
 

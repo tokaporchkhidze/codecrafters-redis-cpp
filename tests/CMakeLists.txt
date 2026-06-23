@@ -12,7 +12,8 @@ set(TARGET_NAME redis-tests)
 
 add_executable(${TARGET_NAME}
         radix-trie-tests.cpp
-        command-registry-tests.cpp)
+        command-registry-tests.cpp
+        replication-manager-tests.cpp)
 
 target_link_libraries(${TARGET_NAME}
         PRIVATE

@@ -21,8 +21,8 @@ public:
     registry_.insert_or_assign(std::move(name), std::move(command));
   }
 
-  // Transparent lookup so callers can search with a string_view name
-  // without allocating a temporary std::string.
+  // TODO: I don' like using raw pointer here.
+  // Need to address this.
   [[nodiscard]] ICommand *find(std::string_view const name) const
   {
     auto const it{registry_.find(name)};

@@ -10,14 +10,15 @@ using namespace redis_core;
 using namespace redis_storage;
 using namespace redis_core::redis_command;
 
-RedisExecutor::RedisExecutor(RedisStorePtr p_redis_store, bool const is_master) :
+RedisExecutor::RedisExecutor(RedisStorePtr p_redis_store,
+                             ReplicationManagerPtr p_replication) :
     p_store_(std::move(p_redis_store)),
-    is_master_(is_master),
-    blocking_manager_(p_store_,
-                      [this](int const client_fd)
-                      { return transaction_manager_.is_in_transaction(
-                                client_fd); }),
-    transaction_manager_(p_store_, blocking_manager_, is_master_)
+    p_replication_(std::move(p_replication)),
+    blocking_manager_(
+            p_store_,
+            [this](int const client_fd)
+            { return transaction_manager_.is_in_transaction(client_fd); }),
+    transaction_manager_(p_store_, blocking_manager_, *p_replication_)
 {
   register_builtin_commands(registry_);
 
@@ -53,8 +54,8 @@ RedisExecutor::ExecutionResult RedisExecutor::execute(RedisCommand &cmd,
                            encode_reply(SimpleString("QUEUED"))};
   }
 
-  CommandDeps deps{p_store_, blocking_manager_, transaction_manager_,
-                   is_master_};
+  CommandDeps deps{
+          p_store_, blocking_manager_, transaction_manager_, *p_replication_};
   auto [type, reply]{command->execute(args, ctx, deps)};
   return ExecutionResult{type, encode_reply(reply)};
 }

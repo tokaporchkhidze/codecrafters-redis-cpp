@@ -25,7 +25,7 @@ class TransactionManager : public ITransactionService
 public:
   TransactionManager(redis_storage::RedisStorePtr store,
                      IBlockingService &blocking,
-                     bool is_master);
+                     IReplicationService &replication);
 
   ExecutionOutcome run_multi(std::span<std::string const> args,
                              CommandContext const &ctx) override;
@@ -64,7 +64,7 @@ private:
 
   redis_storage::RedisStorePtr p_store_;
   IBlockingService &blocking_;
-  bool is_master_{};
+  IReplicationService &replication_;
 
   std::unordered_map<int, std::queue<TransactionCommand>>
           clients_transaction_queue_;

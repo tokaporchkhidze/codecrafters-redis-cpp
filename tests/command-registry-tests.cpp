@@ -1,4 +1,5 @@
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <variant>
@@ -10,6 +11,7 @@
 #include "redis_core/commands/command-interface.h"
 #include "redis_core/commands/command-registry.h"
 #include "redis_core/services/blocking-manager.h"
+#include "redis_core/services/replication-manager.h"
 #include "redis_core/services/transaction-manager.h"
 #include "redis_core/commands/blpop-command.h"
 #include "redis_core/commands/discard-command.h"
@@ -48,6 +50,7 @@ struct TestServices
 {
   redis_storage::RedisStorePtr store;
   BlockingManager blocking;
+  ReplicationManager replication;
   TransactionManager transactions;
 
   explicit TestServices(bool const is_master = true) :
@@ -55,7 +58,10 @@ struct TestServices
       blocking(store,
                [this](int const fd)
                { return transactions.is_in_transaction(fd); }),
-      transactions(store, blocking, is_master)
+      replication(is_master ? std::nullopt
+                            : std::optional<std::string>{"localhost"},
+                  is_master ? std::nullopt : std::optional<int>{6379}),
+      transactions(store, blocking, replication)
   {
   }
 };
@@ -93,7 +99,7 @@ TEST(PingCommandTest, ExecuteRepliesWithPong)
 {
   TestServices services;
   CommandDeps deps{services.store, services.blocking, services.transactions,
-                   true};
+                   services.replication};
 
   PingCommand command;
   std::vector<std::string> const args{};
@@ -187,7 +193,7 @@ TEST(RpushCommandTest, AppendsAndReturnsListSize)
 {
   TestServices services;
   CommandDeps deps{services.store, services.blocking, services.transactions,
-                   true};
+                   services.replication};
   auto const ctx{make_context()};
 
   RpushCommand command;
@@ -203,7 +209,7 @@ TEST(XaddCommandTest, AddsEntryAndReturnsId)
 {
   TestServices services;
   CommandDeps deps{services.store, services.blocking, services.transactions,
-                   true};
+                   services.replication};
   auto const ctx{make_context()};
 
   XaddCommand command;
@@ -219,7 +225,7 @@ TEST(MultiCommandTest, StartsTransactionAndRepliesOk)
 {
   TestServices services;
   CommandDeps deps{services.store, services.blocking, services.transactions,
-                   true};
+                   services.replication};
   auto const ctx{make_context()};
 
   MultiCommand command;
@@ -235,7 +241,7 @@ TEST(InfoCommandTest, ReplicationReportsRole)
 {
   TestServices services;
   CommandDeps deps{services.store, services.blocking, services.transactions,
-                   true};
+                   services.replication};
   auto const ctx{make_context()};
 
   InfoCommand command;
@@ -251,7 +257,7 @@ TEST(EchoCommandTest, EchoesArgument)
 {
   TestServices services;
   CommandDeps deps{services.store, services.blocking, services.transactions,
-                   true};
+                   services.replication};
 
   EchoCommand command;
   std::vector<std::string> const args{"hello"};
@@ -267,7 +273,7 @@ TEST(SetGetCommandTest, SetThenGetReturnsValue)
 {
   TestServices services;
   CommandDeps deps{services.store, services.blocking, services.transactions,
-                   true};
+                   services.replication};
   auto const ctx{make_context()};
 
   SetCommand set_command;
@@ -291,7 +297,7 @@ TEST(GetCommandTest, MissingKeyReturnsNullBulkString)
 {
   TestServices services;
   CommandDeps deps{services.store, services.blocking, services.transactions,
-                   true};
+                   services.replication};
   auto const ctx{make_context()};
 
   GetCommand command;
@@ -306,7 +312,7 @@ TEST(IncrCommandTest, IncrementsAndReturnsInteger)
 {
   TestServices services;
   CommandDeps deps{services.store, services.blocking, services.transactions,
-                   true};
+                   services.replication};
   auto const ctx{make_context()};
 
   IncrCommand command;

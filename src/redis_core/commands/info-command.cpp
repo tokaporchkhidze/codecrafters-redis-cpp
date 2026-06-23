@@ -1,24 +1,12 @@
 #include "info-command.h"
 
-#include <algorithm>
-#include <cctype>
 #include <format>
-#include <string_view>
+
+#include "../command-arg-utils.h"
+#include "../services/replication-service.h"
 
 namespace redis_core::redis_command
 {
-
-namespace
-{
-
-bool command_arg_equals(std::string_view const lhs, std::string_view const rhs)
-{
-  return std::ranges::equal(
-          lhs, rhs, [](char const a, char const b)
-          { return std::toupper(a) == std::toupper(b); });
-}
-
-} // namespace
 
 ArgSpec InfoCommand::arg_spec() const { return {0, 1}; }
 
@@ -27,11 +15,16 @@ ExecutionOutcome InfoCommand::execute(std::span<std::string const> const args,
                                       CommandDeps &deps)
 {
   if (command_arg_equals(args[0], "replication")) {
+    auto const &replication{deps.replication};
     return ExecutionOutcome{
             ResultType::REPLY,
-            BulkString(std::format("{}\nrole:{}",
-                                   "# Replication",
-                                   deps.is_master ? "master" : "slave"))};
+            BulkString(std::format("# Replication\r\n"
+                                   "role:{}\r\n"
+                                   "master_replid:{}\r\n"
+                                   "master_repl_offset:{}",
+                                   replication.is_master() ? "master" : "slave",
+                                   replication.replid(),
+                                   replication.repl_offset()))};
   }
   return ExecutionOutcome{ResultType::REPLY,
                           SimpleError("Unsupported info argument")};

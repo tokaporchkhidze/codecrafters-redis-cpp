@@ -28,13 +28,14 @@ struct ExecutionOutcome
 
 class IBlockingService;
 class ITransactionService;
+class IReplicationService;
 
 struct CommandDeps
 {
   redis_storage::RedisStorePtr store;
   IBlockingService& blocking;
   ITransactionService& transactions;
-  bool is_master{};
+  IReplicationService& replication;
 };
 
 enum class TransactionPolicy

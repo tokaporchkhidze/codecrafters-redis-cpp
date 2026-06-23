@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "redis_core/redis-executor.h"
+#include "redis_core/services/replication-manager.h"
 #include "redis_net/event-loop.h"
 #include "redis_net/tcp-server.h"
 #include "redis_storage/redis-store.h"
@@ -98,9 +99,11 @@ int main(int argc, char *argv[])
     }
     redis_net::EventLoop event_loop;
     auto p_redis_store = std::make_shared<RedisStore>();
-    auto p_redis_executor = std::make_shared<RedisExecutor>(
-            p_redis_store,
-            !parsed_args.value().master_host.has_value());
+    auto p_replication =
+            std::make_shared<redis_core::redis_command::ReplicationManager>(
+                    parsed_args->master_host, parsed_args->master_port);
+    auto p_redis_executor =
+            std::make_shared<RedisExecutor>(p_redis_store, p_replication);
     event_loop.set_timer(
             [p_redis_executor]
             { return p_redis_executor->get_next_blocked_client_timeout(); },
