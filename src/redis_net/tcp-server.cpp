@@ -1,7 +1,6 @@
 #include "tcp-server.h"
 
 #include <cerrno>
-#include <fcntl.h>
 #include <netinet/in.h>
 #include <print>
 #include <sys/epoll.h>
@@ -10,24 +9,9 @@
 #include <unistd.h>
 
 #include "errno-error.h"
+#include "socket-utils.h"
 
 using namespace redis_net;
-
-namespace
-{
-
-void set_nonblocking(int const fd)
-{
-  int const flags{fcntl(fd, F_GETFL, 0)};
-  if (flags == -1) {
-    throw std::system_error{errno, std::system_category()};
-  }
-  if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) == -1) {
-    throw std::system_error{errno, std::system_category()};
-  }
-}
-
-} // namespace
 
 TcpServer::TcpServer(EventLoop &event_loop, RedisExecutorPtr p_redis_executor) :
     event_loop_(event_loop), p_redis_executor_(std::move(p_redis_executor))

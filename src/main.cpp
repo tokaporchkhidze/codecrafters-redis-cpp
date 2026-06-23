@@ -1,5 +1,6 @@
 #include <charconv>
 #include <expected>
+#include <memory>
 #include <optional>
 #include <print>
 #include <ranges>
@@ -10,6 +11,7 @@
 #include "redis_core/redis-executor.h"
 #include "redis_core/services/replication-manager.h"
 #include "redis_net/event-loop.h"
+#include "redis_net/master-link.h"
 #include "redis_net/tcp-server.h"
 #include "redis_storage/redis-store.h"
 
@@ -110,12 +112,21 @@ int main(int argc, char *argv[])
             [p_redis_executor](
                     redis_net::EventLoop::EventLoopClock::time_point const tp)
             { p_redis_executor->expire_blocked_clients(tp); });
+    auto const listening_port{parsed_args->port.value_or(k_default_port)};
     redis_net::TcpServer server{event_loop, p_redis_executor};
-    if (auto started{
-                server.start(parsed_args->port.value_or(k_default_port), 5)};
-        !started) {
+    if (auto started{server.start(listening_port, 5)}; !started) {
       std::println(stderr, "failed to start server: {}", started.error());
       return 1;
+    }
+
+    std::unique_ptr<redis_net::MasterLink> p_master_link;
+    if (!p_replication->is_master()) {
+      p_master_link = std::make_unique<redis_net::MasterLink>(
+              event_loop,
+              *parsed_args->master_host,
+              *parsed_args->master_port,
+              listening_port);
+      p_master_link->start();
     }
 
     std::println("Waiting for clients to connect...");
