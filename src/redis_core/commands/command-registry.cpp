@@ -15,6 +15,7 @@
 #include "lrange-command.h"
 #include "multi-command.h"
 #include "ping-command.h"
+#include "repl-conf-command.h"
 #include "rpush-command.h"
 #include "set-command.h"
 #include "type-command.h"
@@ -50,6 +51,7 @@ void register_builtin_commands(CommandRegistry &registry)
   registry.register_command("WATCH", std::make_unique<WatchCommand>());
   registry.register_command("UNWATCH", std::make_unique<UnwatchCommand>());
   registry.register_command("INFO", std::make_unique<InfoCommand>());
+  registry.register_command("REPLCONF", std::make_unique<ReplConfCommand>());
 }
 
 } // namespace redis_core::redis_command
